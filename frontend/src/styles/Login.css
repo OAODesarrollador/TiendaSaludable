@@ -1,0 +1,72 @@
+:root {
+-webkit-backdrop-filter: blur(6px) saturate(120%);
+backdrop-filter: blur(6px) saturate(120%);
+border: 1px solid rgba(255,255,255,0.6);
+}
+
+
+/* Efecto flotante sutil */
+.card-floating { transform: translateY(0); transition: transform .22s cubic-bezier(.2,.9,.2,1), box-shadow .22s; }
+.card-floating:hover { transform: translateY(-6px); box-shadow: 0 18px 40px rgba(2,6,23,0.12); }
+
+
+/* Logo circular */
+.logo-badge {
+width: 88px;
+height: 88px;
+display: flex;
+align-items: center;
+justify-content: center;
+border-radius: 50%;
+margin: 0 auto;
+background: linear-gradient(135deg, #a7f3d0 0%, #6ee7b7 100%);
+box-shadow: 0 10px 30px rgba(16,185,129,0.12);
+}
+.logo-emoji { font-size: 34px; }
+
+
+/* Inputs */
+.form-control {
+border-radius: 12px;
+border: 1px solid rgba(15,23,42,0.06);
+background-color: rgba(255,255,255,0.9);
+padding: 12px 14px;
+transition: box-shadow .15s, border-color .15s, transform .08s;
+}
+.form-control:focus { box-shadow: 0 8px 22px rgba(6,95,70,0.06); border-color: #34d399; }
+
+
+/* Botón CTA (sobrescribe un poco el estilo por defecto) */
+.btn-cta {
+background: linear-gradient(90deg, var(--emerald-500) 0%, var(--teal-500) 100%);
+border: none;
+color: #fff;
+border-radius: 12px;
+padding: 10px 16px;
+font-weight: 600;
+box-shadow: 0 10px 24px rgba(16,185,129,0.12);
+transition: transform .15s ease, box-shadow .15s ease;
+}
+.btn-cta:hover:not(:disabled) { transform: translateY(-3px); box-shadow: 0 18px 36px rgba(16,185,129,0.16); }
+.btn-cta:disabled { opacity: 0.65; }
+
+
+/* caja de credenciales demo */
+.demo-box { background: rgba(16,185,129,0.04); border: 1px solid rgba(16,185,129,0.08); }
+
+
+/* Loader (lucide) animado) */
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+
+/* Responsividad */
+@media (max-width: 576px) {
+.login-card { border-radius: 14px; }
+.logo-badge { width: 72px; height: 72px; }
+.logo-emoji { font-size: 28px; }
+}
+
+
+/* Pequeño helper para textos */
+.text-emerald-900 { color: #064e3b; }
