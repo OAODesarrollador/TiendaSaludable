@@ -1,14 +1,131 @@
 require('dotenv').config();
 const bcrypt = require('bcryptjs');
-const { db, runAsync } = require('../config/database');
-const { generateEAN13, generateBarcodeImage } = require('./ean13');
+const fs = require('fs');
 const path = require('path');
+const { db } = require('../config/database');
+const { generateEAN13, generateBarcodeImage } = require('./ean13');
 
+// Función para ejecutar queries con promesas
+const runAsync = (query, params = []) => {
+  return new Promise((resolve, reject) => {
+    db.run(query, params, function(err) {
+      if (err) return reject(err);
+      resolve({ id: this.lastID });
+    });
+  });
+};
+
+// Inicializar base de datos (tablas)
+const initializeDatabase = async () => {
+  return new Promise((resolve, reject) => {
+    db.serialize(() => {
+      db.run('PRAGMA foreign_keys = ON');
+
+      // Usuarios
+      db.run(`
+        CREATE TABLE IF NOT EXISTS users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT UNIQUE NOT NULL,
+          password TEXT NOT NULL,
+          full_name TEXT NOT NULL,
+          role TEXT DEFAULT 'vendedor',
+          active INTEGER DEFAULT 1,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Productos
+      db.run(`
+        CREATE TABLE IF NOT EXISTS products (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          sku TEXT UNIQUE NOT NULL,
+          ean13 TEXT UNIQUE,
+          name TEXT NOT NULL,
+          category TEXT NOT NULL,
+          description TEXT,
+          purchase_price REAL NOT NULL,
+          sale_price REAL NOT NULL,
+          stock INTEGER DEFAULT 0,
+          min_stock INTEGER DEFAULT 10,
+          supplier TEXT,
+          active INTEGER DEFAULT 1,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      // Ventas
+      db.run(`
+        CREATE TABLE IF NOT EXISTS sales (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          subtotal REAL NOT NULL,
+          tax REAL NOT NULL,
+          total REAL NOT NULL,
+          payment_method TEXT DEFAULT 'efectivo',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+      `);
+
+      // Items de venta
+      db.run(`
+        CREATE TABLE IF NOT EXISTS sale_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          sale_id INTEGER NOT NULL,
+          product_id INTEGER NOT NULL,
+          product_name TEXT NOT NULL,
+          quantity INTEGER NOT NULL,
+          unit_price REAL NOT NULL,
+          subtotal REAL NOT NULL,
+          FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
+          FOREIGN KEY (product_id) REFERENCES products(id)
+        )
+      `);
+
+      // Devoluciones (nota de crédito)
+      db.run(`
+        CREATE TABLE IF NOT EXISTS refunds (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          sale_id INTEGER NOT NULL,
+          reason TEXT,
+          subtotal REAL,
+          tax REAL,
+          total REAL,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY(sale_id) REFERENCES sales(id)
+        )
+      `);
+
+      // Items de devolución
+      db.run(`
+        CREATE TABLE IF NOT EXISTS refund_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          refund_id INTEGER NOT NULL,
+          product_id INTEGER NOT NULL,
+          product_name TEXT NOT NULL,
+          quantity INTEGER NOT NULL,
+          unit_price REAL NOT NULL,
+          subtotal REAL NOT NULL,
+          FOREIGN KEY(refund_id) REFERENCES refunds(id),
+          FOREIGN KEY(product_id) REFERENCES products(id)
+        )
+      `, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  });
+};
+
+// Seed principal
 const seedDatabase = async () => {
-  console.log('🌱 Iniciando seed de la base de datos...\n');
-
   try {
-    // 1. Crear usuarios de ejemplo
+    console.log('🌱 Inicializando base de datos y creando tablas...');
+    await initializeDatabase();
+    console.log('✅ Tablas listas\n');
+
+    // 1️⃣ Usuarios
     console.log('👤 Creando usuarios...');
     const adminPassword = await bcrypt.hash('admin123', 10);
     const vendedorPassword = await bcrypt.hash('vendedor123', 10);
@@ -18,16 +135,10 @@ const seedDatabase = async () => {
       ('admin', ?, 'Administrador', 'admin'),
       ('vendedor', ?, 'Juan Pérez', 'vendedor')
     `, [adminPassword, vendedorPassword]);
+    console.log('✅ Usuarios creados\n');
 
-    console.log('✅ Usuarios creados');
-    console.log('   - admin / admin123 (Administrador)');
-    console.log('   - vendedor / vendedor123 (Vendedor)\n');
-
-    // 2. Crear productos de ejemplo
+    // 2️⃣ Productos
     console.log('📦 Creando productos...');
-
-    const categories = ['Frutos Secos', 'Dietéticos', 'Suplementos', 'Semillas', 'Harinas'];
-    
     const products = [
       { name: 'Almendras Premium', category: 'Frutos Secos', purchase: 850, sale: 1200, stock: 50 },
       { name: 'Nueces de Castilla', category: 'Frutos Secos', purchase: 920, sale: 1350, stock: 35 },
@@ -61,6 +172,7 @@ const seedDatabase = async () => {
     ];
 
     const barcodeDir = path.join(__dirname, '../../uploads/barcodes');
+    if (!fs.existsSync(barcodeDir)) fs.mkdirSync(barcodeDir, { recursive: true });
 
     for (let i = 0; i < products.length; i++) {
       const product = products[i];
@@ -69,23 +181,16 @@ const seedDatabase = async () => {
 
       await runAsync(`
         INSERT INTO products (
-          sku, ean13, name, category, description, 
+          sku, ean13, name, category, description,
           purchase_price, sale_price, stock, min_stock, supplier
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
-        sku,
-        ean13,
-        product.name,
-        product.category,
+        sku, ean13, product.name, product.category,
         `${product.name} de alta calidad, origen controlado`,
-        product.purchase,
-        product.sale,
-        product.stock,
-        10,
+        product.purchase, product.sale, product.stock, 10,
         'Proveedor Natural SA'
       ]);
 
-      // Generar imagen del código de barras
       const barcodePath = path.join(barcodeDir, `${ean13}.png`);
       generateBarcodeImage(ean13, barcodePath);
 
@@ -94,35 +199,28 @@ const seedDatabase = async () => {
 
     console.log(`\n✅ ${products.length} productos creados con códigos EAN-13\n`);
 
-    // 3. Crear ventas de ejemplo
+    // 3️⃣ Crear ventas de ejemplo
     console.log('💰 Creando ventas de ejemplo...');
+    const salesCount = 5;
 
-    const salesCount = 15;
     for (let i = 0; i < salesCount; i++) {
-      // Fecha aleatoria en los últimos 30 días
-      const daysAgo = Math.floor(Math.random() * 30);
-      const saleDate = new Date();
-      saleDate.setDate(saleDate.getDate() - daysAgo);
-
-      // Subtotal aleatorio entre 500 y 5000
       const subtotal = Math.floor(Math.random() * 4500) + 500;
       const tax = subtotal * 0.21;
       const total = subtotal + tax;
 
-      const result = await runAsync(`
+      const sale = await runAsync(`
         INSERT INTO sales (user_id, subtotal, tax, total, payment_method, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
       `, [
-        Math.random() > 0.5 ? 1 : 2, // Admin o vendedor
+        Math.random() > 0.5 ? 1 : 2,
         subtotal,
         tax,
         total,
-        Math.random() > 0.3 ? 'efectivo' : 'tarjeta',
-        saleDate.toISOString()
+        Math.random() > 0.5 ? 'efectivo' : 'tarjeta',
+        new Date().toISOString()
       ]);
 
-      // Agregar 2-5 items por venta
-      const itemsCount = Math.floor(Math.random() * 4) + 2;
+      const itemsCount = Math.floor(Math.random() * 3) + 1;
       for (let j = 0; j < itemsCount; j++) {
         const productId = Math.floor(Math.random() * products.length) + 1;
         const quantity = Math.floor(Math.random() * 3) + 1;
@@ -133,29 +231,22 @@ const seedDatabase = async () => {
           INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price, subtotal)
           VALUES (?, ?, ?, ?, ?, ?)
         `, [
-          result.id,
-          productId,
-          products[productId - 1].name,
-          quantity,
-          unitPrice,
-          itemSubtotal
+          sale.id, productId, products[productId - 1].name,
+          quantity, unitPrice, itemSubtotal
         ]);
+
+        // Actualizar stock
+        await runAsync('UPDATE products SET stock = stock - ? WHERE id = ?', [quantity, productId]);
       }
     }
 
-    console.log(`✅ ${salesCount} ventas creadas\n`);
+    console.log(`✅ ${salesCount} ventas creadas con stock actualizado`);
 
-    console.log('🎉 ¡Seed completado exitosamente!\n');
-    console.log('═══════════════════════════════════════');
-    console.log('📊 RESUMEN:');
-    console.log('   • 2 usuarios creados');
-    console.log(`   • ${products.length} productos con EAN-13`);
-    console.log(`   • ${salesCount} ventas de ejemplo`);
-    console.log('═══════════════════════════════════════\n');
-
+    console.log('\n🎉 Seed completado exitosamente!');
     process.exit(0);
+
   } catch (error) {
-    console.error('❌ Error ejecutando seed:', error);
+    console.error('❌ Error en seed:', error);
     process.exit(1);
   }
 };
