@@ -32,9 +32,10 @@ const Layout = () => {
   };
 
   const menuItems = [
-    { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
-    { path: '/pos', icon: ShoppingCart, label: 'Punto de Venta' },
+    
+    { path: '/pos', icon: ShoppingCart, label: 'POS' },
     { path: '/products', icon: Package, label: 'Productos' },
+    { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/sales', icon: DollarSign, label: 'Ventas' },
     { path: '/reports', icon: FileText, label: 'Reportes' },
   ];

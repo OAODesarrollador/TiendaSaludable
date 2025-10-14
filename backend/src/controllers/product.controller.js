@@ -80,6 +80,7 @@ const createProduct = async (req, res) => {
   try {
     const {
       sku,
+      
       name,
       category,
       description,
@@ -107,7 +108,10 @@ const createProduct = async (req, res) => {
     let attempts = 0;
     
     while (!isUnique && attempts < 10) {
-      ean13 = generateEAN13();
+      if (!ean13 || ean13 === '') {
+        ean13 = generateEAN13();
+      }
+      
       const existingEAN = await getAsync('SELECT id FROM products WHERE ean13 = ?', [ean13]);
       if (!existingEAN) {
         isUnique = true;
@@ -118,7 +122,7 @@ const createProduct = async (req, res) => {
     if (!isUnique) {
       return res.status(500).json({ error: 'No se pudo generar un código EAN-13 único' });
     }
-    
+   
     // Insertar producto
     const sql = `
       INSERT INTO products (
@@ -172,7 +176,7 @@ const updateProduct = async (req, res) => {
     
     // Construir query de actualización dinámicamente
     const allowedFields = [
-      'name', 'category', 'description', 'purchase_price', 
+      'name', 'ean13', 'category', 'description', 'purchase_price', 
       'sale_price', 'stock', 'min_stock', 'supplier', 'active'
     ];
     

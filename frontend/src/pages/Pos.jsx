@@ -101,7 +101,9 @@ const POS = () => {
 
   // Calcular totales
   const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const tax = subtotal * IVA_RATE;
+  const subtotalNoTax = subtotal / (1 + IVA_RATE);
+  const tax = subtotal - (subtotal /(1 + IVA_RATE));
+  console.log(tax, IVA_RATE +1);
   const total = subtotal + tax;
 
   // Procesar venta
@@ -299,7 +301,7 @@ const POS = () => {
           <div className="border-t border-gray-200 pt-4 space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-gray-600">Subtotal:</span>
-              <span className="font-medium">${subtotal.toFixed(2)}</span>
+              <span className="font-medium">${subtotalNoTax.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-600">IVA (21%):</span>
@@ -307,7 +309,7 @@ const POS = () => {
             </div>
             <div className="flex justify-between text-lg font-bold border-t border-gray-200 pt-2">
               <span>TOTAL:</span>
-              <span className="text-primary-600">${total.toFixed(2)}</span>
+              <span className="text-primary-600">${subtotal.toFixed(2)}</span>
             </div>
           </div>
 

@@ -120,6 +120,7 @@ const Products = () => {
     setEditingProduct(product);
     setFormData({
       sku: product.sku ?? '',
+      ean13: product.ean13 ?? '',
       name: product.name ?? '',
       category: product.category ?? '',
       description: product.description ?? '',
@@ -340,7 +341,17 @@ const Products = () => {
                     disabled={!!editingProduct}
                   />
                 </div>
-
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">EAN-13</label>
+                  <input
+                    name="ean13"
+                    value={formData.ean13}
+                    onChange={handleChange}
+                    
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                    
+                  />
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Categoría *</label>
                   <input
@@ -385,7 +396,7 @@ const Products = () => {
                   <input
                     name="purchase_price"
                     type="number"
-                    step="0.01"
+                    step="1"
                     min="0"
                     value={formData.purchase_price}
                     onChange={handleChange}
@@ -399,7 +410,7 @@ const Products = () => {
                   <input
                     name="sale_price"
                     type="number"
-                    step="0.01"
+                    step="1"
                     min="0"
                     value={formData.sale_price}
                     onChange={handleChange}
