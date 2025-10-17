@@ -1,0 +1,25 @@
+# Configuración de archivos para Git
+
+# Archivos de texto con terminaciones de línea LF
+*.bat text eol=crlf
+*.txt text eol=crlf
+*.md text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+
+# Archivos binarios
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+
+# Archivos que deben mantenerse con permisos de ejecución
+*.bat text eol=crlf
+

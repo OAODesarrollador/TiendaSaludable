@@ -1,0 +1,67 @@
+===============================================
+    TIENDA NATURAL - SISTEMA POS
+===============================================
+
+INSTRUCCIONES DE INSTALACIÓN Y USO
+===================================
+
+ARCHIVOS PRINCIPALES:
+- start.bat        : Instala dependencias y ejecuta la aplicación (PRIMERA VEZ)
+- run.bat          : Solo ejecuta la aplicación (si ya está instalada)
+- stop.bat         : Detiene todos los servicios
+- install-node.bat : Instala Node.js si no lo tienes
+
+PASOS PARA USAR LA APLICACIÓN:
+==============================
+
+1. PRIMERA VEZ (Instalación completa):
+   - Haz doble clic en "start.bat"
+   - Espera a que se instalen todas las dependencias
+   - La aplicación se abrirá automáticamente en tu navegador
+
+2. USOS POSTERIORES (Solo ejecutar):
+   - Haz doble clic en "run.bat"
+   - La aplicación se abrirá automáticamente
+
+3. DETENER LA APLICACIÓN:
+   - Haz doble clic en "stop.bat"
+   - O cierra las ventanas de comandos que se abrieron
+
+REQUISITOS DEL SISTEMA:
+=======================
+- Windows 10 o superior
+- Node.js (se instala automáticamente si no lo tienes)
+- Navegador web (Chrome, Firefox, Edge, etc.)
+
+PUERTOS UTILIZADOS:
+==================
+- Backend: http://localhost:3000
+- Frontend: http://localhost:5173
+
+SOLUCIÓN DE PROBLEMAS:
+======================
+
+Si la aplicación no inicia:
+1. Verifica que Node.js esté instalado ejecutando "install-node.bat"
+2. Asegúrate de que los puertos 3000 y 5173 no estén en uso
+3. Ejecuta "start.bat" nuevamente para reinstalar dependencias
+
+Si aparece error de permisos:
+1. Ejecuta el archivo .bat como administrador
+2. O instala Node.js manualmente desde nodejs.org
+
+Si el navegador no se abre automáticamente:
+1. Abre tu navegador manualmente
+2. Ve a: http://localhost:5173
+
+ESTRUCTURA DEL PROYECTO:
+========================
+- backend/     : Servidor Node.js con Express
+- frontend/    : Aplicación React con Vite
+- database/    : Base de datos SQLite
+
+CONTACTO:
+=========
+Si tienes problemas, revisa los archivos de log en las ventanas
+de comandos que se abren al ejecutar la aplicación.
+

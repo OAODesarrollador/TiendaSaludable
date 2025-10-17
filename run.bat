@@ -1,8 +1,8 @@
 @echo off
-title Tienda Natural - POS (Método Rápido)
-color 0A
+title Tienda Natural - Ejecutar Aplicación
+color 0B
 echo ===============================================
-echo    TIENDA NATURAL - MÉTODO RÁPIDO
+echo    EJECUTANDO TIENDA NATURAL
 echo ===============================================
 echo.
 
@@ -23,22 +23,28 @@ if not exist "frontend\node_modules" (
     exit /b 1
 )
 
-echo Iniciando solo el backend (método rápido)...
-cd backend
-start "" cmd /k "npm start"
-cd ..
+echo Iniciando servidor backend...
+start "Backend Server" cmd /k "cd backend && npm start"
 
-echo Esperando a que el servidor arranque...
+echo Esperando a que el backend se inicie...
 timeout /t 5 /nobreak >nul
 
-echo Abriendo aplicación en el navegador...
-start "" http://localhost:3000
+echo Iniciando servidor frontend...
+start "Frontend Server" cmd /k "cd frontend && npm run dev"
 
+echo Esperando a que el frontend se inicie...
+timeout /t 8 /nobreak >nul
+
+echo Abriendo aplicación en el navegador...
+start "" http://localhost:5173
+
+echo.
 echo ===============================================
-echo   Backend iniciado correctamente
+echo    APLICACIÓN INICIADA
 echo ===============================================
 echo.
-echo NOTA: Este método solo inicia el backend.
-echo Para la aplicación completa, usa: start.bat
+echo Backend: http://localhost:3000
+echo Frontend: http://localhost:5173
 echo.
 pause
+
