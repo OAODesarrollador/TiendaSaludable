@@ -1,48 +1,44 @@
 const { db, runAsync, getAsync, allAsync } = require('../config/database');
 const PDFDocument = require('pdfkit');
 
-// Crear nueva venta (procesar ticket)
+// ============================================
+// CREAR NUEVA VENTA
+// ============================================
 const createSale = async (req, res) => {
   try {
     const { items, payment_method = 'efectivo' } = req.body;
     const userId = req.user.id;
     
-    // Validaciones
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'No hay productos en la venta' });
     }
-    
-    // Iniciar transacción
+
     await runAsync('BEGIN TRANSACTION');
-    
+
     try {
       let subtotal = 0;
       const saleItems = [];
-      
+
       // Verificar stock y calcular totales
       for (const item of items) {
         const product = await getAsync(
           'SELECT id, name, sale_price, stock FROM products WHERE id = ? AND active = 1',
           [item.product_id]
         );
-        
+
         if (!product) {
           await runAsync('ROLLBACK');
-          return res.status(400).json({ 
-            error: `Producto ID ${item.product_id} no encontrado` 
-          });
+          return res.status(400).json({ error: `Producto ID ${item.product_id} no encontrado` });
         }
-        
+
         if (product.stock < item.quantity) {
           await runAsync('ROLLBACK');
-          return res.status(400).json({ 
-            error: `Stock insuficiente para ${product.name}. Disponible: ${product.stock}` 
-          });
+          return res.status(400).json({ error: `Stock insuficiente para ${product.name}. Disponible: ${product.stock}` });
         }
-        
+
         const itemSubtotal = product.sale_price * item.quantity;
         subtotal += itemSubtotal;
-        
+
         saleItems.push({
           product_id: product.id,
           product_name: product.name,
@@ -51,41 +47,36 @@ const createSale = async (req, res) => {
           subtotal: itemSubtotal
         });
         
-        // Descontar del stock
-        await runAsync(
-          'UPDATE products SET stock = stock - ? WHERE id = ?',
-          [item.quantity, product.id]
-        );
+        await runAsync('UPDATE products SET stock = stock - ? WHERE id = ?', [item.quantity, product.id]);
       }
-      
-      // Calcular impuestos y total
+
       const taxRate = parseFloat(process.env.IVA_RATE || 21) / 100;
-      const tax = subtotal * taxRate;
-      const total = subtotal + tax;
-      
-      // Insertar venta
+      const totalNoTax = subtotal / (1 + taxRate);
+      const tax = subtotal - totalNoTax;
+      const total =  totalNoTax + tax;
+
+
+
       const saleResult = await runAsync(
         'INSERT INTO sales (user_id, subtotal, tax, total, payment_method) VALUES (?, ?, ?, ?, ?)',
-        [userId, subtotal, tax, total, payment_method]
+        [userId, totalNoTax, tax, total, payment_method]
       );
-      
+
       const saleId = saleResult.id;
-      
-      // Insertar items de la venta
+
       for (const item of saleItems) {
         await runAsync(
-          `INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price, subtotal) 
+          `INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price, subtotal)
            VALUES (?, ?, ?, ?, ?, ?)`,
           [saleId, item.product_id, item.product_name, item.quantity, item.unit_price, item.subtotal]
         );
       }
-      
+
       await runAsync('COMMIT');
-      
-      // Obtener venta completa con items
+
       const sale = await getAsync('SELECT * FROM sales WHERE id = ?', [saleId]);
       const saleItemsFromDb = await allAsync('SELECT * FROM sale_items WHERE sale_id = ?', [saleId]);
-      
+
       res.status(201).json({
         message: 'Venta procesada exitosamente',
         sale: { ...sale, items: saleItemsFromDb }
@@ -101,11 +92,13 @@ const createSale = async (req, res) => {
   }
 };
 
-// Obtener todas las ventas
+// ============================================
+// OBTENER TODAS LAS VENTAS
+// ============================================
 const getAllSales = async (req, res) => {
   try {
     const { start_date, end_date, limit = 50, offset = 0 } = req.query;
-    
+
     let sql = `
       SELECT s.*, u.full_name as seller_name 
       FROM sales s 
@@ -113,27 +106,27 @@ const getAllSales = async (req, res) => {
       WHERE 1=1
     `;
     const params = [];
-    
+
     if (start_date) {
       sql += ' AND DATE(s.created_at) >= DATE(?)';
       params.push(start_date);
     }
-    
+
     if (end_date) {
       sql += ' AND DATE(s.created_at) <= DATE(?)';
       params.push(end_date);
     }
-    
+
     sql += ' ORDER BY s.created_at DESC LIMIT ? OFFSET ?';
     params.push(parseInt(limit), parseInt(offset));
-    
+
     const sales = await allAsync(sql, params);
-    
-    // Obtener items para cada venta
+
     for (const sale of sales) {
       sale.items = await allAsync('SELECT * FROM sale_items WHERE sale_id = ?', [sale.id]);
+      sale.refunds = await allAsync('SELECT * FROM refunds WHERE sale_id = ?', [sale.id]);
     }
-    
+
     res.json(sales);
   } catch (error) {
     console.error('Error obteniendo ventas:', error);
@@ -141,24 +134,25 @@ const getAllSales = async (req, res) => {
   }
 };
 
-// Obtener venta por ID
+// ============================================
+// OBTENER VENTA POR ID
+// ============================================
 const getSaleById = async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     const sale = await getAsync(`
       SELECT s.*, u.full_name as seller_name 
       FROM sales s 
       LEFT JOIN users u ON s.user_id = u.id 
       WHERE s.id = ?
     `, [id]);
-    
-    if (!sale) {
-      return res.status(404).json({ error: 'Venta no encontrada' });
-    }
-    
+
+    if (!sale) return res.status(404).json({ error: 'Venta no encontrada' });
+
     sale.items = await allAsync('SELECT * FROM sale_items WHERE sale_id = ?', [id]);
-    
+    sale.refunds = await allAsync('SELECT * FROM refunds WHERE sale_id = ?', [id]);
+
     res.json(sale);
   } catch (error) {
     console.error('Error obteniendo venta:', error);
@@ -166,75 +160,188 @@ const getSaleById = async (req, res) => {
   }
 };
 
-// Generar PDF del ticket
+// ============================================
+// NUEVO: CREAR NOTA DE CRÉDITO (DEVOLUCIÓN)
+// ============================================
+const createRefund = async (req, res) => {
+  try {
+    const { id: sale_id } = req.params;
+    const { items, reason } = req.body;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'No hay productos para devolver' });
+    }
+
+    const sale = await getAsync('SELECT * FROM sales WHERE id = ?', [sale_id]);
+    if (!sale) return res.status(404).json({ error: 'Venta no encontrada' });
+
+    await runAsync('BEGIN TRANSACTION');
+    try {
+      let subtotal = 0;
+      const refundItems = [];
+
+      for (const item of items) {
+        const saleItem = await getAsync(
+          'SELECT * FROM sale_items WHERE sale_id = ? AND product_id = ?',
+          [sale_id, item.product_id]
+        );
+        if (!saleItem) {
+          await runAsync('ROLLBACK');
+          return res.status(400).json({ error: `El producto ID ${item.product_id} no pertenece a esta venta` });
+        }
+
+        if (item.quantity > saleItem.quantity) {
+          await runAsync('ROLLBACK');
+          return res.status(400).json({
+            error: `Cantidad inválida para ${saleItem.product_name}, máximo ${saleItem.quantity}`
+          });
+        }
+
+        const itemSubtotal = saleItem.unit_price * item.quantity;
+        subtotal += itemSubtotal;
+
+        refundItems.push({
+          product_id: saleItem.product_id,
+          product_name: saleItem.product_name,
+          quantity: item.quantity,
+          unit_price: saleItem.unit_price,
+          subtotal: itemSubtotal
+        });
+
+        await runAsync('UPDATE products SET stock = stock + ? WHERE id = ?', [
+          item.quantity,
+          saleItem.product_id
+        ]);
+      }
+
+      const taxRate = parseFloat(process.env.IVA_RATE || 21) / 100;
+      const tax = subtotal * taxRate;
+      const total = subtotal + tax;
+
+      const refundResult = await runAsync(
+        `INSERT INTO refunds (sale_id, reason, subtotal, tax, total)
+         VALUES (?, ?, ?, ?, ?)`,
+        [sale_id, reason || null, subtotal, tax, total]
+      );
+
+      const refundId = refundResult.id;
+
+      for (const item of refundItems) {
+        await runAsync(
+          `INSERT INTO refund_items (refund_id, product_id, product_name, quantity, unit_price, subtotal)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [refundId, item.product_id, item.product_name, item.quantity, item.unit_price, item.subtotal]
+        );
+      }
+
+      await runAsync('COMMIT');
+
+      const refund = await getAsync('SELECT * FROM refunds WHERE id = ?', [refundId]);
+      refund.items = await allAsync('SELECT * FROM refund_items WHERE refund_id = ?', [refundId]);
+
+      res.status(201).json({
+        message: 'Nota de crédito creada exitosamente',
+        refund
+      });
+    } catch (error) {
+      await runAsync('ROLLBACK');
+      console.error('Error en devolución:', error);
+      throw error;
+    }
+  } catch (error) {
+    console.error('Error creando nota de crédito:', error);
+    res.status(500).json({ error: 'Error al crear la nota de crédito' });
+  }
+};
+
+// ============================================
+// OBTENER DEVOLUCIONES DE UNA VENTA
+// ============================================
+const getRefundsBySale = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const refunds = await allAsync('SELECT * FROM refunds WHERE sale_id = ?', [id]);
+    for (const refund of refunds) {
+      refund.items = await allAsync('SELECT * FROM refund_items WHERE refund_id = ?', [refund.id]);
+    }
+    res.json(refunds);
+  } catch (error) {
+    console.error('Error obteniendo devoluciones:', error);
+    res.status(500).json({ error: 'Error al obtener devoluciones' });
+  }
+};
+
+// ============================================
+// OBTENER UNA NOTA DE CRÉDITO POR ID
+// ============================================
+const getRefundById = async (req, res) => {
+  try {
+    const { refundId } = req.params;
+    const refund = await getAsync('SELECT * FROM refunds WHERE id = ?', [refundId]);
+    if (!refund) return res.status(404).json({ error: 'Nota de crédito no encontrada' });
+
+    refund.items = await allAsync('SELECT * FROM refund_items WHERE refund_id = ?', [refundId]);
+    res.json(refund);
+  } catch (error) {
+    console.error('Error obteniendo nota de crédito:', error);
+    res.status(500).json({ error: 'Error al obtener nota de crédito' });
+  }
+};
+
+// ============================================
+// GENERAR PDF DEL TICKET
+// ============================================
 const generateTicketPDF = async (req, res) => {
   try {
     const { id } = req.params;
-    
     const sale = await getAsync(`
       SELECT s.*, u.full_name as seller_name 
       FROM sales s 
       LEFT JOIN users u ON s.user_id = u.id 
       WHERE s.id = ?
     `, [id]);
-    
-    if (!sale) {
-      return res.status(404).json({ error: 'Venta no encontrada' });
-    }
-    
+    if (!sale) return res.status(404).json({ error: 'Venta no encontrada' });
+
     const items = await allAsync('SELECT * FROM sale_items WHERE sale_id = ?', [id]);
-    
-    // Crear PDF
-    const doc = new PDFDocument({ size: [226.77, 841.89], margin: 20 }); // Ancho 80mm (ticket térmico)
-    
-    // Headers para descarga
+
+    const doc = new PDFDocument({ size: [226.77, 841.89], margin: 20 });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=ticket_${id}.pdf`);
-    
     doc.pipe(res);
-    
-    // Encabezado
+
     doc.fontSize(16).text('🌿 Tienda Natural', { align: 'center' });
     doc.fontSize(10).text('Productos Naturales y Dietéticos', { align: 'center' });
     doc.moveDown(0.5);
     doc.fontSize(8).text('─'.repeat(38), { align: 'center' });
     doc.moveDown(0.5);
-    
-    // Información de la venta
-    doc.fontSize(9).text(`Ticket #${sale.id}`, { align: 'left' });
-    doc.fontSize(8).text(`Fecha: ${new Date(sale.created_at).toLocaleString('es-AR')}`, { align: 'left' });
-    doc.text(`Vendedor: ${sale.seller_name}`, { align: 'left' });
-    doc.text(`Pago: ${sale.payment_method.toUpperCase()}`, { align: 'left' });
+
+    doc.fontSize(9).text(`Ticket #${sale.id}`);
+    doc.fontSize(8).text(`Fecha: ${new Date(sale.created_at).toLocaleString('es-AR')}`);
+    doc.text(`Vendedor: ${sale.seller_name}`);
+    doc.text(`Pago: ${sale.payment_method.toUpperCase()}`);
     doc.moveDown(0.5);
     doc.text('─'.repeat(38), { align: 'center' });
     doc.moveDown(0.5);
-    
-    // Items
+
     doc.fontSize(8);
     items.forEach(item => {
-      doc.text(item.product_name, { continued: false });
-      doc.text(
-        `  ${item.quantity} x $${item.unit_price.toFixed(2)} = $${item.subtotal.toFixed(2)}`,
-        { align: 'left' }
-      );
+      doc.text(item.product_name);
+      doc.text(`  ${item.quantity} x $${item.unit_price.toFixed(2)} = $${item.subtotal.toFixed(2)}`);
       doc.moveDown(0.3);
     });
-    
+
     doc.moveDown(0.5);
     doc.text('─'.repeat(38), { align: 'center' });
     doc.moveDown(0.5);
-    
-    // Totales
     doc.fontSize(9);
     doc.text(`Subtotal: $${sale.subtotal.toFixed(2)}`, { align: 'right' });
     doc.text(`IVA (${process.env.IVA_RATE}%): $${sale.tax.toFixed(2)}`, { align: 'right' });
-    doc.moveDown(0.3);
-    doc.fontSize(11).text(`TOTAL: $${sale.total.toFixed(2)}`, { align: 'right', bold: true });
-    
+    doc.fontSize(11).text(`TOTAL: $${sale.total.toFixed(2)}`, { align: 'right' });
+
     doc.moveDown(1);
     doc.fontSize(8).text('¡Gracias por su compra!', { align: 'center' });
     doc.text('Vuelva pronto', { align: 'center' });
-    
+
     doc.end();
   } catch (error) {
     console.error('Error generando PDF:', error);
@@ -246,5 +353,8 @@ module.exports = {
   createSale,
   getAllSales,
   getSaleById,
-  generateTicketPDF
+  generateTicketPDF,
+  createRefund,
+  getRefundsBySale,
+  getRefundById
 };

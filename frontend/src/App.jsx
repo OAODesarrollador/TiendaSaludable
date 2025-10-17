@@ -9,7 +9,7 @@ import 'react-toastify/dist/ReactToastify.css';
 // Páginas
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
-import POS from './pages/POS';
+import POS from './pages/Pos';
 import Products from './pages/Products';
 import Sales from './pages/Sales';
 import Reports from './pages/Reports';

@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import '../styles/Layout.css'; // <-- Asegurate esta ruta
+import logo from '../assets/Avenia.png'
 
 const Layout = () => {
   const navigate = useNavigate();
@@ -49,11 +50,12 @@ const Layout = () => {
       <header className="ln-header">
         <div className="ln-header-inner">
           <div className="ln-brand">
-            <div className="ln-logo">🌿</div>
-            <div className="ln-title">
-              <div className="ln-title-main">Tienda Natural</div>
-              <div className="ln-title-sub">Sistema de Gestión</div>
+            <div className="ln-logo">
+              
+              <img src={logo} alt="logo" width="150" height="100" style={{marginLeft: '8px', borderRadius: '4px'}} />
+              
             </div>
+            
           </div>
 
           {/* NAV desktop */}

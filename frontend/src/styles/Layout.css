@@ -45,14 +45,14 @@ body,html,#root{height:100%}
   min-width: 190px;
 }
 .ln-logo{
-  width:44px;height:44px;border-radius:10px;
-  display:flex;align-items:center;justify-content:center;
+  width:100%;height:100px;border-radius:10px;
+  display: inline-flex;align-items:center;justify-content:center;
   background: linear-gradient(135deg,#bbf7d0,#86efac);
   box-shadow: 0 6px 20px rgba(16,185,129,0.08);
   font-size: 20px;
 }
 .ln-title-main{font-weight:700;color:var(--accent-600)}
-.ln-title-sub{font-size:12px;color:var(--muted)}
+.ln-title-sub{font-size:12px;color:var(--muted);}
 
 /* NAV - desktop */
 .ln-nav{
