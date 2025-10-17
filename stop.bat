@@ -6,6 +6,9 @@ echo    DETENIENDO APLICACIÓN
 echo ===============================================
 echo.
 
+REM Moverse a la carpeta donde está este script
+cd /d "%~dp0"
+
 echo Cerrando procesos de Node.js...
 taskkill /f /im node.exe >nul 2>&1
 

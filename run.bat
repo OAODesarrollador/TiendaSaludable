@@ -6,6 +6,9 @@ echo    EJECUTANDO TIENDA NATURAL
 echo ===============================================
 echo.
 
+REM Moverse a la carpeta donde está este script
+cd /d "%~dp0"
+
 REM Verificar si las dependencias están instaladas
 if not exist "backend\node_modules" (
     echo ERROR: Las dependencias no están instaladas.

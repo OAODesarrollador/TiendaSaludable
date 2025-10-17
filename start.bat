@@ -6,6 +6,9 @@ echo    TIENDA NATURAL - SISTEMA POS
 echo ===============================================
 echo.
 
+REM Moverse a la carpeta donde está este script
+cd /d "%~dp0"
+
 REM Verificar si Node.js está instalado
 node --version >nul 2>&1
 if %errorlevel% neq 0 (
@@ -42,10 +45,10 @@ echo.
 
 REM Instalar dependencias del backend
 echo [2/5] Instalando dependencias del backend...
-cd backend
+pushd backend
 if not exist node_modules (
     echo Instalando dependencias del backend...
-    call npm install
+    call npm ci || call npm install
     if %errorlevel% neq 0 (
         echo ERROR: Falló la instalación de dependencias del backend
         pause
@@ -54,14 +57,14 @@ if not exist node_modules (
 ) else (
     echo Dependencias del backend ya instaladas ✓
 )
-cd ..
+popd
 
 REM Instalar dependencias del frontend
 echo [3/5] Instalando dependencias del frontend...
-cd frontend
+pushd frontend
 if not exist node_modules (
     echo Instalando dependencias del frontend...
-    call npm install
+    call npm ci || call npm install
     if %errorlevel% neq 0 (
         echo ERROR: Falló la instalación de dependencias del frontend
         pause
@@ -70,7 +73,7 @@ if not exist node_modules (
 ) else (
     echo Dependencias del frontend ya instaladas ✓
 )
-cd ..
+popd
 
 REM Configurar base de datos
 echo [4/5] Configurando base de datos...
