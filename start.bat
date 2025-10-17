@@ -55,7 +55,17 @@ if not exist node_modules (
         exit /b 1
     )
 ) else (
-    echo Dependencias del backend ya instaladas ✓
+    if not exist node_modules\dotenv (
+        echo Reparando dependencias del backend (falta dotenv)...
+        call npm install
+        if %errorlevel% neq 0 (
+            echo ERROR: Falló la reparación de dependencias del backend
+            pause
+            exit /b 1
+        )
+    ) else (
+        echo Dependencias del backend ya instaladas ✓
+    )
 )
 popd
 
@@ -71,7 +81,17 @@ if not exist node_modules (
         exit /b 1
     )
 ) else (
-    echo Dependencias del frontend ya instaladas ✓
+    if not exist node_modules\react (
+        echo Reparando dependencias del frontend...
+        call npm install
+        if %errorlevel% neq 0 (
+            echo ERROR: Falló la reparación de dependencias del frontend
+            pause
+            exit /b 1
+        )
+    ) else (
+        echo Dependencias del frontend ya instaladas ✓
+    )
 )
 popd
 
