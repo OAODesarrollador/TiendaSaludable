@@ -141,7 +141,7 @@ const POS = () => {
     }).join('');
 
     const content = `
-      <div style="font-family: Arial, sans-serif; font-size: 13px; color:#111; width:280px; margin:20px auto; padding:10px; background:#fff;">
+      <div style="font-family: 'Courier New', monospace; font-size: 13px; color:#111; width:280px; margin:20px auto; padding:10px; background:#fff;">
         <div style="text-align:center; margin-bottom:8px;">
           <div>
             <img src="${logo}" alt="logo" style="width:130px; height:auto; padding:15px; "/>

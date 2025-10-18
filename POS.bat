@@ -1,47 +1,46 @@
 @echo off
-title Tienda Natural - POS (Método Rápido)
+title Iniciando Proyecto POS
 color 0A
-echo ===============================================
-echo    TIENDA NATURAL - MÉTODO RÁPIDO
-echo ===============================================
+
+echo ===========================================
+echo         INICIANDO PROYECTO POS
+echo ===========================================
 echo.
 
-REM Moverse a la carpeta donde está este script
+:: Moverse a la carpeta donde está este archivo
 cd /d "%~dp0"
 
-REM Verificar si las dependencias están instaladas
-if not exist "backend\node_modules" (
-    echo ERROR: Las dependencias no están instaladas.
-    echo Ejecuta primero: start.bat
-    echo.
-    pause
-    exit /b 1
+:: Iniciar el backend (si existe carpeta "backend")
+if exist "backend" (
+    echo Iniciando servidor backend...
+    start cmd /k "cd backend && npm start"
+) else (
+    echo No se encontro la carpeta 'backend'. Se omitira.
 )
 
-if not exist "frontend\node_modules" (
-    echo ERROR: Las dependencias no están instaladas.
-    echo Ejecuta primero: start.bat
-    echo.
-    pause
-    exit /b 1
+:: Iniciar el frontend (si existe carpeta "frontend")
+if exist "frontend" (
+    echo Iniciando servidor frontend...
+    start cmd /k "cd frontend && npm run dev"
+) else (
+    echo No se encontro la carpeta 'frontend'. Se omitira.
 )
 
-echo Iniciando solo el backend (método rápido)...
-cd backend
-start "" cmd /k "npm start"
-cd ..
+:: Si no hay subcarpetas, ejecutar directamente npm start desde la raíz
+if not exist "backend" if not exist "frontend" (
+    echo Iniciando servidor principal...
+    start cmd /k "npm start"
+)
 
-echo Esperando a que el servidor arranque...
-timeout /t 5 /nobreak >nul
+:: Esperar unos segundos para dar tiempo a que el servidor levante
+echo Esperando que el servidor inicie...
+timeout /t 10 /nobreak >nul
 
-echo Abriendo aplicación en el navegador...
-start "" http://localhost:3000
+:: Abrir el navegador (ajusta el puerto si usás otro)
+start http://localhost:3000
 
-echo ===============================================
-echo   Backend iniciado correctamente
-echo ===============================================
-echo.
-echo NOTA: Este método solo inicia el backend.
-echo Para la aplicación completa, usa: start.bat
-echo.
+echo ===========================================
+echo El proyecto se ha iniciado correctamente.
+echo ===========================================
 pause
+exit
