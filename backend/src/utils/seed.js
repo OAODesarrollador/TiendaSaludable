@@ -48,6 +48,7 @@ const initializeDatabase = async () => {
           stock INTEGER DEFAULT 0,
           min_stock INTEGER DEFAULT 10,
           supplier TEXT,
+          expiration_date DATE,
           active INTEGER DEFAULT 1,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -118,6 +119,15 @@ const initializeDatabase = async () => {
   });
 };
 
+// Función para generar fecha de vencimiento aleatoria
+const generateExpirationDate = (minMonths = 3, maxMonths = 24) => {
+  const today = new Date();
+  const months = Math.floor(Math.random() * (maxMonths - minMonths + 1)) + minMonths;
+  const expirationDate = new Date(today);
+  expirationDate.setMonth(expirationDate.getMonth() + months);
+  return expirationDate.toISOString().split('T')[0]; // Formato YYYY-MM-DD
+};
+
 // Seed principal
 const seedDatabase = async () => {
   try {
@@ -178,26 +188,27 @@ const seedDatabase = async () => {
       const product = products[i];
       const sku = `PROD-${String(i + 1).padStart(4, '0')}`;
       const ean13 = generateEAN13();
+      const expirationDate = generateExpirationDate(3, 24);
 
       await runAsync(`
         INSERT INTO products (
           sku, ean13, name, category, description,
-          purchase_price, sale_price, stock, min_stock, supplier
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          purchase_price, sale_price, stock, min_stock, supplier, expiration_date
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         sku, ean13, product.name, product.category,
         `${product.name} de alta calidad, origen controlado`,
         product.purchase, product.sale, product.stock, 10,
-        'Proveedor Natural SA'
+        'Proveedor Natural SA', expirationDate
       ]);
 
       const barcodePath = path.join(barcodeDir, `${ean13}.png`);
       generateBarcodeImage(ean13, barcodePath);
 
-      console.log(`   ✓ ${product.name} (EAN: ${ean13})`);
+      console.log(`   ✓ ${product.name} (EAN: ${ean13}, Vence: ${expirationDate})`);
     }
 
-    console.log(`\n✅ ${products.length} productos creados con códigos EAN-13\n`);
+    console.log(`\n✅ ${products.length} productos creados con códigos EAN-13 y fechas de vencimiento\n`);
 
     // 3️⃣ Crear ventas de ejemplo
     console.log('💰 Creando ventas de ejemplo...');

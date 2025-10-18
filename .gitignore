@@ -9,14 +9,14 @@ build/
 frontend/dist/
 
 # Archivos de entorno
-.env
+
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 
 # Base de datos
-backend/database/*.db
+
 backend/database/*.sqlite
 backend/database/*.sqlite3
 

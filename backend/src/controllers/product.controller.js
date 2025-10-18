@@ -87,6 +87,7 @@ const createProduct = async (req, res) => {
       sale_price,
       stock,
       min_stock,
+      expiration_date,
       supplier
     } = req.body;
 
@@ -122,8 +123,8 @@ const createProduct = async (req, res) => {
     const sql = `
       INSERT INTO products (
         sku, ean13, name, category, description, 
-        purchase_price, sale_price, stock, min_stock, supplier
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        purchase_price, sale_price, stock, min_stock, expiration_date, supplier
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const result = await runAsync(sql, [
@@ -136,6 +137,7 @@ const createProduct = async (req, res) => {
       sale_price,
       stock || 0,
       min_stock || 10,
+      expiration_date || null,
       supplier || null
     ]);
 
@@ -168,18 +170,24 @@ const updateProduct = async (req, res) => {
 
     const allowedFields = [
       'name', 'ean13', 'category', 'description', 'purchase_price', 
-      'sale_price', 'stock', 'min_stock', 'supplier', 'active'
+      'sale_price', 'stock', 'min_stock', 'expiration_date', 'supplier', 'active'
     ];
 
     const fields = [];
     const values = [];
 
     for (const field of allowedFields) {
-      if (updates[field] !== undefined) {
+      if (Object.prototype.hasOwnProperty.call(updates, field)) {
+        // Si el campo viene vacío, lo guardamos como NULL (SQLite-friendly)
+        const value =
+          updates[field] === '' || updates[field] === null
+            ? null
+            : updates[field];
         fields.push(`${field} = ?`);
-        values.push(updates[field]);
+        values.push(value);
       }
     }
+
 
     if (fields.length === 0) {
       return res.status(400).json({ error: 'No hay campos para actualizar' });
