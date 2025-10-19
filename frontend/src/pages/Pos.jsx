@@ -132,7 +132,7 @@ const POS = () => {
       const price = (it.price ?? it.unit_price ?? it.product?.price ?? 0);
       const lineTotal = (price * qty);
       return `
-        <div style="display:flex; justify-content:space-between; font-size:13px; padding:4px 0; border-bottom:1px dashed #e5e7eb;">
+        <div style="display:flex; justify-content:space-between; font-size:13px; padding:4px 0;">
           <div style="width:50%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${name}</div>
           <div style="width:16%; text-align:right;">${Number(qty).toFixed(3).replace(/\.?0+$/,"")}</div>
           <div style="width:33%; text-align:right;">$${lineTotal.toFixed(2)}</div>
@@ -141,43 +141,56 @@ const POS = () => {
     }).join('');
 
     const content = `
-      <div style="font-family: 'Courier New', monospace; font-size: 13px; color:#111; width:280px; margin:20px auto; padding:10px; background:#fff;">
+      <div style="font-family: Arial, sans-serif; font-size: 13px; color:black; width:280px; margin: auto; padding:10px; background:#fff;">
         <div style="text-align:center; margin-bottom:8px;">
           <div>
             <img src="${logo}" alt="logo" style="width:130px; height:auto; padding:15px; "/>
           </div>
-          <p style="font-size:11px; margin:0;">Av. Falsa 123 • Ciudad</p>
-          <p style="font-size:11px; margin:0;">Tel: +54 370 4054127</p>
-          <p style="font-size:11px;">CUIT: 30-99999999-1</p>
+          <p style="font-size:11px; margin:0;"> Faustino Allende 1034 • Córdoba, Argentina</p>
+          <p style="font-size:11px; margin:0;">Tel: +54 351 654 4601</p>
+          <p style="font-size:11px;">Instagram: @avenia.ar</p>
         </div>
-        <hr style="border:1px dashed #ccc; margin:6px 0;">
-        <div style="font-size:13px; color:#4b5563; margin-bottom:8px;">
-          Fecha: ${new Date(lastSale.created_at ?? lastSale.date ?? Date.now()).toLocaleString()}
+        <hr style="border:1px solid gray; margin:6px 0;">
+
+        <div style="font-size:13px; solid; margin-bottom:8px;">
+          <span style="font-weight:bold;">Ticket #${lastSale.id}</span> - Fecha: ${new Date(lastSale.created_at ?? lastSale.date ?? Date.now()).toLocaleString()}
+
         </div>
-        <div style="border-top:1px solid #e5e7eb; padding-top:8px;">
+
+        <hr style="border: 1px solid gray; width: 100%; margin-top: 8px;">
+        <div style="display:flex; justify-content:space-between; font-size:13px; padding:4px 0;">
+          <div style="width:50%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Producto</div>
+          <div style="width:16%; text-align:right;">Cantidad</div>
+          <div style="width:33%; text-align:right;">Total</div>
+        </div>
+        <div style=" padding-top:3px;">
           ${items}
         </div>
+        <hr style="border: 1px solid gray; width: 100%; margin-top: 8px;">
+
         <div style="margin-top:12px; font-size:13px;">
           <div style="display:flex; justify-content:space-between;">
             <span>Subtotal:</span>
-            <span>$${(lastSale.subtotal ?? subtotalNoTax).toFixed(2)}</span>
+            <span>$${(lastSale.total ?? subtotalNoTax).toFixed(2)}</span>
           </div>
           <div style="display:flex; justify-content:space-between;">
-            <span>IVA:</span>
-            <span>$${(lastSale.tax ?? tax).toFixed(2)}</span>
+            <span>Descuento:</span>
+            <span>$${(lastSale.discount ?? 0).toFixed(2)}</span>
           </div>
           <div style="display:flex; justify-content:space-between; font-weight:bold; margin-top:8px;">
             <span>TOTAL:</span>
             <span>$${(lastSale.total ?? lastSale.amount ?? subtotal).toFixed(2)}</span>
           </div>
         </div>
-        <div style="margin-top:16px; font-size:11px; color:#6b7280;">
+        <hr style="border: 1px solid gray; width: 100%; margin-top: 8px;">
+        <div style="padding:8px; font-size:11px; solid">
           <div>Forma de pago: ${lastSale.payment_method ?? '---'}</div>
-          <div style="margin-top:8px;">Gracias por su compra...!</div>
         </div>
-        <hr style="border:1px dashed #ccc; margin:6px 0;">
+        <hr style="border: 1px solid gray; width: 100%; margin-top: auto;">
         <div style="text-align:center; margin-top:6px; font-size:12px;">
           <p>Gracias por su compra...!</p>
+          <br>
+          <p>TICKET NO VALIDO COMO FACTURA</p>
         </div>
       </div>
     `;
@@ -277,8 +290,9 @@ const POS = () => {
       const companyDetails = `
         <div style="text-align:center; font-family: Arial, sans-serif; margin-bottom:6px;">
          <img src="${logo}" alt="logo" width="120" height="40" /><br/>
-          <span style="font-size:11px;">CUIT: 30-99999999-9</span><br/>
-          <span style="font-size:11px;">Av. Falsa 123, Ciudad - Tel: +54 370 4054127</span>
+          <span style="font-size:11px;">Faustino Allende 1034 - Córdoba, Argentina</span><br/>
+          <span style="font-size:11px;">Tel: +54 351 654 4601</span><br/>
+          <span style="font-size:11px;">Instagram: @avenia.ar</span><br/>
         </div>
       `;
       const content = `<div style="font-family:Arial, sans-serif; font-size:12px; width:280px; padding:8px;">${headerLogoSVG}${companyDetails}${ticketRef.current.innerHTML}</div>`;
@@ -500,11 +514,11 @@ const POS = () => {
               <span className="text-blue-600">${subtotal.toFixed(2)}</span>
             </div>
           </div>
-        <div className="flex gap-3 mt-4">
+
           <button
             onClick={handleCheckout}
             disabled={cart.length === 0 || loading}
-            className="flex-[3] bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
+            className="w-full mt-4 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
           >
             {loading ? 'Procesando...' : 'Finalizar Venta'}
           </button>
@@ -517,11 +531,10 @@ const POS = () => {
               }
             }}
             disabled={cart.length === 0}
-            className="flex-1 bg-red-600 text-white py-3 rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 disabled:bg-gray-300"
+            className="w-full mt-2 bg-red-600 text-white py-3 rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 disabled:bg-gray-300"
           >
-            Cancelar
+            Cancelar Venta
           </button>
-        </div>
         </div>
       </div>
 
@@ -581,8 +594,9 @@ const POS = () => {
                 <img src={logo} alt="logo" className="h-12 w-auto " />
               </div>
               <div className="flex-3 text-center">
-                <p className="text-sm text-gray-600">Av. Falsa 123 • Ciudad • Tel: +54 370 4054127</p>
-                <p className="text-sm text-gray-600">CUIT: 30-99999999-1</p>
+                <p className="text-sm text-gray-600">Faustino Allende 1034 • Cordoba, Argentina</p>
+                <p className="text-sm text-gray-600">Tel: +54 370 4054127</p>
+                <p className="text-sm text-gray-600">Instagram: @avenia.ar</p>
               </div>
             </div>
 
@@ -601,7 +615,10 @@ const POS = () => {
                     const price = (it.price ?? it.unit_price ?? it.product?.price ?? 0);
                     const lineTotal = (price * qty);
                     return (
-                      <div key={idx} className="flex justify-between text-sm py-1 border-b border-dashed border-gray-100">
+                      
+                      <div key={idx} className="flex justify-between text-sm py-1 ">
+                        
+
                         <div className="w-1/2 truncate">{name}</div>
                         <div className="w-1/6 text-right">{Number(qty).toFixed(3).replace(/\.?0+$/,"")}</div>                      
                         <div className="w-1/3 text-right">${lineTotal.toFixed(2)}</div>
