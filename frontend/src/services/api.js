@@ -81,4 +81,50 @@ export const dashboardAPI = {
   getStats: () => api.get('/dashboard/stats')
 };
 
+// ========== IMPORTADOR ==========
+
+export async function fetchProducts() {
+  const res = await fetch(`${API_URL}/products`);
+  return res.json();
+}
+
+export async function createProduct(data) {
+  const res = await fetch(`${API_URL}/products`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+export async function updateProduct(id, data) {
+  const res = await fetch(`${API_URL}/products/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  return res.json();
+}
+
+export async function deleteProduct(id) {
+  const res = await fetch(`${API_URL}/products/${id}`, { method: 'DELETE' });
+  return res.json();
+}
+
+export const importCsv = async (formData) => {
+  const res = await fetch(`${API_URL}/import`, {
+    method: 'POST',
+    body: formData
+  });
+
+  // Manejo explícito de errores HTTP
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Error en servidor: ${res.status} ${text || res.statusText}`);
+  }
+
+  // Retornamos el JSON parseado
+  return res.json();
+};
+
 export default api;

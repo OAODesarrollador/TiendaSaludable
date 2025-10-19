@@ -39,6 +39,7 @@ const Layout = () => {
     { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/sales', icon: DollarSign, label: 'Ventas' },
     { path: '/reports', icon: FileText, label: 'Reportes' },
+    { path: '/importador', icon: FileText, label: 'Importador' },
   ];
 
   // helper para marcar activo

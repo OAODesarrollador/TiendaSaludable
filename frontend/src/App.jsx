@@ -14,6 +14,7 @@ import Products from './pages/Products';
 import Sales from './pages/Sales';
 import Reports from './pages/Reports';
 import Layout from './components/Layout';
+import Importador from './components/Importador';
 
 // Componente de ruta protegida
 const PrivateRoute = ({ children }) => {
@@ -50,6 +51,7 @@ function App() {
           <Route path="products" element={<Products />} />
           <Route path="sales" element={<Sales />} />
           <Route path="reports" element={<Reports />} />
+          <Route path="importador" element={<Importador />} />
         </Route>
       </Routes>
     </BrowserRouter>
