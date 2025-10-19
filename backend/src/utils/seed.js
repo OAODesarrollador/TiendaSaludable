@@ -150,35 +150,8 @@ const seedDatabase = async () => {
     // 2️⃣ Productos
     console.log('📦 Creando productos...');
     const products = [
-      { name: 'Almendras Premium', category: 'Frutos Secos', purchase: 850, sale: 1200, stock: 50 },
-      { name: 'Nueces de Castilla', category: 'Frutos Secos', purchase: 920, sale: 1350, stock: 35 },
-      { name: 'Avellanas Tostadas', category: 'Frutos Secos', purchase: 780, sale: 1100, stock: 40 },
-      { name: 'Mix Frutos Secos', category: 'Frutos Secos', purchase: 650, sale: 950, stock: 60 },
-      { name: 'Pasas de Uva', category: 'Frutos Secos', purchase: 320, sale: 480, stock: 80 },
-
-      { name: 'Stevia en Polvo 100g', category: 'Dietéticos', purchase: 450, sale: 650, stock: 45 },
-      { name: 'Azúcar de Coco Orgánica', category: 'Dietéticos', purchase: 520, sale: 750, stock: 30 },
-      { name: 'Chips de Banana Sin Azúcar', category: 'Dietéticos', purchase: 380, sale: 550, stock: 55 },
-      { name: 'Barras de Cereal Light x6', category: 'Dietéticos', purchase: 290, sale: 420, stock: 70 },
-      { name: 'Galletitas de Arroz', category: 'Dietéticos', purchase: 180, sale: 280, stock: 90 },
-
-      { name: 'Proteína Whey 1kg', category: 'Suplementos', purchase: 4500, sale: 6200, stock: 15 },
-      { name: 'Creatina Monohidrato 300g', category: 'Suplementos', purchase: 2100, sale: 2900, stock: 20 },
-      { name: 'BCAA en Polvo 250g', category: 'Suplementos', purchase: 1800, sale: 2500, stock: 18 },
-      { name: 'Multivitamínico x60 caps', category: 'Suplementos', purchase: 890, sale: 1250, stock: 40 },
-      { name: 'Omega 3 x100 caps', category: 'Suplementos', purchase: 1200, sale: 1650, stock: 25 },
-
-      { name: 'Semillas de Chía 500g', category: 'Semillas', purchase: 420, sale: 600, stock: 65 },
-      { name: 'Semillas de Lino 500g', category: 'Semillas', purchase: 380, sale: 540, stock: 55 },
-      { name: 'Semillas de Sésamo 500g', category: 'Semillas', purchase: 340, sale: 490, stock: 60 },
-      { name: 'Semillas de Girasol 500g', category: 'Semillas', purchase: 310, sale: 450, stock: 70 },
-      { name: 'Mix Semillas Nutritivas', category: 'Semillas', purchase: 450, sale: 650, stock: 45 },
-
-      { name: 'Harina de Almendras 500g', category: 'Harinas', purchase: 680, sale: 950, stock: 30 },
-      { name: 'Harina de Coco 500g', category: 'Harinas', purchase: 520, sale: 720, stock: 35 },
-      { name: 'Harina Integral 1kg', category: 'Harinas', purchase: 280, sale: 400, stock: 100 },
-      { name: 'Harina de Avena 1kg', category: 'Harinas', purchase: 320, sale: 460, stock: 85 },
-      { name: 'Harina de Garbanzo 500g', category: 'Harinas', purchase: 380, sale: 550, stock: 40 }
+      { name: 'Varios', category: 'Varios', purchase: 1, sale: 2, stock: 10000 },
+      
     ];
 
     const barcodeDir = path.join(__dirname, '../../uploads/barcodes');
@@ -212,7 +185,7 @@ const seedDatabase = async () => {
 
     // 3️⃣ Crear ventas de ejemplo
     console.log('💰 Creando ventas de ejemplo...');
-    const salesCount = 5;
+    const salesCount = 1;
 
     for (let i = 0; i < salesCount; i++) {
       const subtotal = Math.floor(Math.random() * 4500) + 500;
