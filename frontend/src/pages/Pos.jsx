@@ -146,7 +146,7 @@ const POS = () => {
           <div>
             <img src="${logo}" alt="logo" style="width:130px; height:auto; padding:15px; "/>
           </div>
-          <p style="font-size:11px; margin:0;"> Faustino Allende 1034 • Córdoba, Argentina</p>
+          <p style="font-size:11px; margin:0;"> Faustino Allende 1034 - Córdoba, Argentina</p>
           <p style="font-size:11px; margin:0;">Tel: +54 351 654 4601</p>
           <p style="font-size:11px;">Instagram: @avenia.ar</p>
         </div>
@@ -515,26 +515,29 @@ const POS = () => {
             </div>
           </div>
 
-          <button
-            onClick={handleCheckout}
-            disabled={cart.length === 0 || loading}
-            className="w-full mt-4 bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
-          >
-            {loading ? 'Procesando...' : 'Finalizar Venta'}
-          </button>
+          <div className="flex gap-2 mt-2">  
+            <button
+              onClick={handleCheckout}
+              disabled={cart.length === 0 || loading}
+              className="flex-[3] bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
+            >
+              {loading ? 'Procesando...' : 'Finalizar Venta'}
+            </button>
 
-          <button
-            onClick={() => {
-              if (cart.length > 0 && window.confirm('¿Estás seguro de cancelar la venta y vaciar el carrito?')) {
-                setCart([]);
-                toast.info('Carrito vacío');
-              }
-            }}
-            disabled={cart.length === 0}
-            className="w-full mt-2 bg-red-600 text-white py-3 rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 disabled:bg-gray-300"
-          >
-            Cancelar Venta
-          </button>
+            <button
+              onClick={() => {
+                if (cart.length > 0 && window.confirm('¿Estás seguro de cancelar la venta y vaciar el carrito?')) {
+                  setCart([]);
+                  setDiscount(0);
+                  toast.info('Carrito vacío');
+                }
+              }}
+              disabled={cart.length === 0}
+              className="flex-1 bg-red-600 text-white py-3 rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 disabled:bg-gray-300"
+            >
+              Cancelar
+            </button>
+          </div>
         </div>
       </div>
 
@@ -570,7 +573,7 @@ const POS = () => {
                   onChange={handleCalcQuantityChange}
                   placeholder="Ej: 1.250 o 1,25"
                 />
-                <p className="text-xs text-gray-500 mt-1">Se permiten coma o punto como separador decimal. Máx 3 decimales.</p>
+                <p className="text-xs text-gray-500 mt-1">Se permiten coma o punto como separador decimal. Max 3 decimales.</p>
               </div>
 
               <div className="text-lg font-bold text-center mt-3">
@@ -600,8 +603,29 @@ const POS = () => {
               </div>
             </div>
 
+            <div className="d-flex justify-content-between w-100">
+              <span>Ticket #{lastSale.id}</span>
+              <span>
+                {new Date(lastSale.created_at ?? lastSale.date ?? Date.now())
+                  .toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })}
+                {" - "}
+                {new Date(lastSale.created_at ?? lastSale.date ?? Date.now())
+                  .toLocaleTimeString("es-AR", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                    timeZone: "America/Argentina/Buenos_Aires"
+                  })}
+              </span>
+            </div>
+
             <div ref={ticketRef} style={{ maxHeight: '52vh', overflowY: 'auto', marginTop: 12 }}>
-              <div className="text-sm text-gray-600 mb-2">Fecha: {new Date(lastSale.created_at ?? lastSale.date ?? Date.now()).toLocaleString()}</div>
+              <div className="flex justify-between text-sm py-1 border-t border-gray-200 pt-2">
+                <div className="w-1/2 truncate">Producto</div>
+                <div className="w-1/6 text-right">Cantidad</div>
+                <div className="w-1/6 text-right">Precio</div>
+                <div className="w-1/6 text-right">Total</div>
+              </div>
 
               <div className="border-t border-gray-200 pt-2">
                 {(lastSale.items ?? lastSale.line_items ?? lastSale.details ?? []).length === 0 ? (
@@ -616,7 +640,7 @@ const POS = () => {
                     const lineTotal = (price * qty);
                     return (
                       
-                      <div key={idx} className="flex justify-between text-sm py-1 ">
+                      <div key={idx} className="flex justify-between text-sm py-1  ">
                         
 
                         <div className="w-1/2 truncate">{name}</div>
@@ -628,19 +652,19 @@ const POS = () => {
                 )}
               </div>
 
-              <div className="mt-3 text-sm">
+              <div className="mt-3 text-sm border-t border-gray-200 pt-2">
                 <div className="flex justify-between"><span>Subtotal:</span><span>${(lastSale.subtotal ?? subtotalNoTax).toFixed(2)}</span></div>
                 <div className="flex justify-between"><span>IVA:</span><span>${(lastSale.tax ?? tax).toFixed(2)}</span></div>
                 <div className="flex justify-between font-bold mt-2"><span>TOTAL:</span><span>${(lastSale.total ?? lastSale.amount ?? subtotal).toFixed(2)}</span></div>
               </div>
 
-              <div className="mt-4 text-xs text-gray-500">
-                <div>Forma de pago: {lastSale.payment_method ?? '---'}</div>
-                <div className="mt-2">Gracias por su compra...!</div>
+              <div className="border-t border-b-2 border-gray-200 mb-2 mt-2 p-3 text-center">
+                <div className='fs-5'>Forma de pago: {lastSale.payment_method ?? '---'}</div>
+                
               </div>
             </div>
 
-            <div className="mt-4 pt-4 border-t border-gray-100 flex gap-3">
+            <div className="mt-4 pt-1  flex gap-2">
               <button
                 onClick={handlePrintTicket}
                 title="Imprimir ticket"

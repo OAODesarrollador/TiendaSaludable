@@ -2,5 +2,8 @@
   "name": "tienda-natural",
   "private": true,
   "description": "Meta proyecto: usar start.bat para instalar/ejecutar",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@ericblade/quagga2": "^1.8.4"
+  }
 }
