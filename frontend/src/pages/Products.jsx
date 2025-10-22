@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { productsAPI } from '../services/api';
 import { toast } from 'react-toastify';
-import { Plus, Edit2, Trash2, Printer } from 'lucide-react';
+import { Plus, Edit2, Trash2, Printer, Camera } from 'lucide-react';
 import Barcode from 'react-barcode';
 
 import ProductModal from '../components/ProductModal';
-
+import BarcodeScanner from '../components/BarcodeScanner';
 
 const Products = () => {
   const [products, setProducts] = useState([]);
@@ -37,6 +37,9 @@ const Products = () => {
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [printQuantity, setPrintQuantity] = useState(1);
 
+  // Estado para el escáner de códigos de barras
+  const [showScanner, setShowScanner] = useState(false);
+
   useEffect(() => {
     loadProducts();
     loadCategories();
@@ -44,7 +47,7 @@ const Products = () => {
 
   useEffect(() => {
     // Bloquear scroll del body cuando el modal está abierto
-    if (showModal || showPrintModal) {
+    if (showModal || showPrintModal || showScanner) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
@@ -52,7 +55,7 @@ const Products = () => {
     return () => {
       document.body.style.overflow = 'unset';
     };
-  }, [showModal, showPrintModal]);
+  }, [showModal, showPrintModal, showScanner]);
 
   const loadProducts = async () => {
     try {
@@ -71,6 +74,33 @@ const Products = () => {
       setCategories(response.data);
     } catch (error) {
       console.error(error);
+    }
+  };
+
+  // Función para manejar código de barras escaneado
+  const handleBarcodeDetected = (code) => {
+    console.log('Código detectado:', code);
+    
+    // Buscar el producto por EAN13 o SKU
+    const foundProduct = products.find(
+      (p) => p.ean13 === code || p.sku === code
+    );
+
+    if (foundProduct) {
+      setSelectedProduct(foundProduct);
+      setSearchTerm(code);
+      toast.success(`Producto encontrado: ${foundProduct.name}`);
+      
+      // Scroll hacia el producto en la tabla (opcional)
+      setTimeout(() => {
+        const productRow = document.querySelector(`[data-product-id="${foundProduct.id}"]`);
+        if (productRow) {
+          productRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+    } else {
+      toast.warning(`No se encontró producto con código: ${code}`);
+      setSearchTerm(code);
     }
   };
 
@@ -209,166 +239,166 @@ const Products = () => {
     setShowPrintModal(true);
   };
 
-// Función para imprimir etiquetas
-const handlePrintLabels = () => {
-  if (!selectedProduct || !selectedProduct.ean13) {
-    toast.error('El producto debe tener un código EAN-13 para imprimir');
-    return;
-  }
+  // Función para imprimir etiquetas
+  const handlePrintLabels = () => {
+    if (!selectedProduct || !selectedProduct.ean13) {
+      toast.error('El producto debe tener un código EAN-13 para imprimir');
+      return;
+    }
 
-  // Crear contenido HTML para imprimir
-  const printWindow = window.open('', '_blank');
-  const labels = [];
+    // Crear contenido HTML para imprimir
+    const printWindow = window.open('', '_blank');
+    const labels = [];
 
-  // Generar las etiquetas según la cantidad
-  for (let i = 0; i < printQuantity; i++) {
-    labels.push(`
-      <div class="label">
-        <div class="product-info">
-          <div class="sku">${selectedProduct.sku}</div>
-          <div class="product-name">${selectedProduct.name}</div>
-          <div class="description">${selectedProduct.description}</div>
+    // Generar las etiquetas según la cantidad
+    for (let i = 0; i < printQuantity; i++) {
+      labels.push(`
+        <div class="label">
+          <div class="product-info">
+            <div class="sku">${selectedProduct.sku}</div>
+            <div class="product-name">${selectedProduct.name}</div>
+            <div class="description">${selectedProduct.description}</div>
+          </div>
+          <div class="price">$ ${selectedProduct.sale_price?.toFixed(2)}</div>
+          <div class="barcode-container">
+            <svg id="barcode-${i}"></svg>
+          </div>
         </div>
-        <div class="price">$ ${selectedProduct.sale_price?.toFixed(2)}</div>
-        <div class="barcode-container">
-          <svg id="barcode-${i}"></svg>
-        </div>
-      </div>
-    `);
-  }
+      `);
+    }
 
-  printWindow.document.write(`
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <title>Etiquetas</title>
-        <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
-        <style>
-          * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-          }
-          
-          @page {
-            size: 80mm auto;
-            margin: 0;
-          }
-          
-          body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            width: 80mm;
-          }
-          
-          .label {
-            width: 80mm;
-            border: 2px solid #000;
-            padding: 4mm;
-            margin: 0 0 5mm 0;
-            page-break-inside: avoid;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            box-sizing: border-box;
-            font-family: 'Courier New', monospace;
-          }
-          
-          .product-info {
-            width: 100%;
-            text-align: left;
-            margin-bottom: 3mm;
-          }
-          
-          .sku {
-            font-size: 10pt;
-            color: #333;
-            font-weight: normal;
-            margin-bottom: 1mm;
-          }
-          
-          .product-name {
-            font-size: 11pt;
-            font-weight: normal;
-            color: #000;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            line-height: 1.2;
-          }
-          
-          .price {
-            font-size: 28pt;
-            font-weight: bold;
-            color: #000;
-            text-align: center;
-            margin: 3mm 0;
-          }
-          
-          .barcode-container {
-            text-align: center;
-            width: 100%;
-            margin-top: 2mm;
-          }
-          
-          .barcode-container svg {
-            max-width: 100%;
-            height: auto;
-          }
-          
-          @media print {
-            body {
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Etiquetas</title>
+          <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+          <style>
+            * {
               margin: 0;
               padding: 0;
+              box-sizing: border-box;
+            }
+            
+            @page {
+              size: 80mm auto;
+              margin: 0;
+            }
+            
+            body {
+              font-family: Arial, sans-serif;
+              margin: 0;
+              padding: 0;
+              width: 80mm;
             }
             
             .label {
-              margin: 0;
-              page-break-after: always;
+              width: 80mm;
+              border: 2px solid #000;
+              padding: 4mm;
+              margin: 0 0 5mm 0;
+              page-break-inside: avoid;
+              display: flex;
+              flex-direction: column;
+              justify-content: center;
+              align-items: center;
+              box-sizing: border-box;
+              font-family: 'Courier New', monospace;
             }
             
-            .label:last-child {
-              page-break-after: auto;
-            }
-          }
-        </style>
-      </head>
-      <body>
-        ${labels.join('')}
-        <script>
-          // Generar códigos de barras
-          window.onload = function() {
-            for (let i = 0; i < ${printQuantity}; i++) {
-              JsBarcode("#barcode-" + i, "${selectedProduct.ean13}", {
-                format: "EAN13",
-                width: 2,
-                height: 50,
-                displayValue: true,
-                fontSize: 12,
-                margin: 0,
-                marginTop: 0,
-                marginBottom: 0
-              });
+            .product-info {
+              width: 100%;
+              text-align: left;
+              margin-bottom: 3mm;
             }
             
-            // Imprimir automáticamente después de generar los códigos
-            setTimeout(() => {
-              window.print();
-            }, 800);
-          };
-        </script>
-      </body>
-    </html>
-  `);
-  
-  printWindow.document.close();
-  setShowPrintModal(false);
-  toast.success(`Imprimiendo ${printQuantity} etiqueta(s)`);
-};
+            .sku {
+              font-size: 10pt;
+              color: #333;
+              font-weight: normal;
+              margin-bottom: 1mm;
+            }
+            
+            .product-name {
+              font-size: 11pt;
+              font-weight: normal;
+              color: #000;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              display: -webkit-box;
+              -webkit-line-clamp: 2;
+              -webkit-box-orient: vertical;
+              line-height: 1.2;
+            }
+            
+            .price {
+              font-size: 28pt;
+              font-weight: bold;
+              color: #000;
+              text-align: center;
+              margin: 3mm 0;
+            }
+            
+            .barcode-container {
+              text-align: center;
+              width: 100%;
+              margin-top: 2mm;
+            }
+            
+            .barcode-container svg {
+              max-width: 100%;
+              height: auto;
+            }
+            
+            @media print {
+              body {
+                margin: 0;
+                padding: 0;
+              }
+              
+              .label {
+                margin: 0;
+                page-break-after: always;
+              }
+              
+              .label:last-child {
+                page-break-after: auto;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          ${labels.join('')}
+          <script>
+            // Generar códigos de barras
+            window.onload = function() {
+              for (let i = 0; i < ${printQuantity}; i++) {
+                JsBarcode("#barcode-" + i, "${selectedProduct.ean13}", {
+                  format: "EAN13",
+                  width: 2,
+                  height: 50,
+                  displayValue: true,
+                  fontSize: 12,
+                  margin: 0,
+                  marginTop: 0,
+                  marginBottom: 0
+                });
+              }
+              
+              // Imprimir automáticamente después de generar los códigos
+              setTimeout(() => {
+                window.print();
+              }, 800);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    
+    printWindow.document.close();
+    setShowPrintModal(false);
+    toast.success(`Imprimiendo ${printQuantity} etiqueta(s)`);
+  };
 
   const filteredProducts = products.filter((p) => {
     const matchesSearch =
@@ -378,9 +408,6 @@ const handlePrintLabels = () => {
     const matchesCategory = !selectedCategory || p.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
-
-  // Componente Modal usando Portal
-  
 
   // Modal de impresión
   const PrintModal = () => {
@@ -487,6 +514,15 @@ const handlePrintLabels = () => {
           <div className="flex justify-between items-center mb-4">
             <h1 className="text-2xl font-semibold text-gray-900">Productos</h1>
             <div className="flex items-center gap-2">
+              {/* Botón para abrir escáner */}
+              <button
+                onClick={() => setShowScanner(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+                title="Escanear código de barras"
+              >
+                <Camera size={18} /> Escanear
+              </button>
+              
               <button
                 onClick={openNewProductModal}
                 className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
@@ -498,13 +534,24 @@ const handlePrintLabels = () => {
 
           {/* Filtros */}
           <div className="flex flex-col md:flex-row gap-4 mb-4">
-            <input
-              type="text"
-              placeholder="Buscar por nombre, SKU o EAN..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
-            />
+            <div className="relative flex-1">
+              <input
+                type="text"
+                placeholder="Buscar por nombre, SKU o EAN..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full px-4 py-2 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
+              />
+              {/* Botón de escáner dentro del input */}
+              <button
+                onClick={() => setShowScanner(true)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-blue-600 hover:bg-blue-50 rounded transition"
+                title="Escanear código"
+              >
+                <Camera size={20} />
+              </button>
+            </div>
+            
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
@@ -531,13 +578,13 @@ const handlePrintLabels = () => {
                   <th className="px-2 py-3 text-left font-medium text-gray-700 uppercase bg-green-200">Stock</th>
                   <th className="px-2 py-3 text-left font-medium text-gray-700 uppercase bg-green-200">Vencimiento</th>
                   <th className="px-2 py-3 text-left font-medium text-gray-700 uppercase bg-green-200">Acciones</th>
-                  
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200 ">
+              <tbody className="divide-y divide-gray-200">
                 {filteredProducts.map((p, idx) => (
                   <tr
                     key={p.id}
+                    data-product-id={p.id}
                     onClick={() => setSelectedProduct(p)}
                     className={`cursor-pointer transition
                       ${idx % 2 === 0 ? 'bg-gray-50' : 'bg-gray-100'}
@@ -577,7 +624,6 @@ const handlePrintLabels = () => {
                           <Trash2 size={16} />
                         </button>
                       </div>
-                      
                     </td>
                   </tr>
                 ))}
@@ -633,8 +679,6 @@ const handlePrintLabels = () => {
                   <Barcode value={selectedProduct.ean13} format="EAN13" width={2} height={80} displayValue />
                 )}
               </div>
-
-              
             </>
           ) : (
             <div className="bg-white border border-gray-200 rounded-xl shadow-md p-4 text-center text-gray-400 mt-4">
@@ -654,10 +698,16 @@ const handlePrintLabels = () => {
         handlePriceBlur={handlePriceBlur}
         handleSubmit={handleSubmit}
         resetForm={resetForm}
-        categories={categories}     // ✅ se pasa como prop
+        categories={categories}
       />
 
-      
+      {/* Componente del escáner de códigos de barras */}
+      <BarcodeScanner
+        isOpen={showScanner}
+        onClose={() => setShowScanner(false)}
+        onDetected={handleBarcodeDetected}
+      />
+
       {/* Modal de impresión */}
       <PrintModal />
     </>

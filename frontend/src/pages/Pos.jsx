@@ -16,9 +16,13 @@ const POS = () => {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [calcPrice, setCalcPrice] = useState(0);
   const [calcTotal, setCalcTotal] = useState(0);
-
   const [calcQuantityInput, setCalcQuantityInput] = useState('1');
   const [calcQuantityNumber, setCalcQuantityNumber] = useState(1);
+  const [discount, setDiscount] = useState(0);
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [discountType, setDiscountType] = useState('percentage');
+  const [discountValue, setDiscountValue] = useState(0);
+  const [editingProductId, setEditingProductId] = useState(null);
 
   const barcodeInputRef = useRef(null);
   const ticketRef = useRef(null);
@@ -77,7 +81,15 @@ const POS = () => {
         toast.error('Producto sin stock');
         return;
       }
-      setCart([...cart, { product_id: product.id, name: product.name, price: salePrice, quantity: q, stock: product.stock }]);
+      setCart([...cart, { 
+        product_id: product.id, 
+        name: product.name, 
+        price: salePrice, 
+        quantity: q, 
+        stock: product.stock,
+        discount: 0,
+        discountType: 'percentage'
+      }]);
     }
   };
 
@@ -100,19 +112,61 @@ const POS = () => {
     setCart(cart.filter(item => item.product_id !== productId));
   };
 
-  const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const subtotalNoTax = subtotal / (1 + IVA_RATE);
-  const tax = subtotal - subtotalNoTax;
+  const calculateItemDiscount = (item) => {
+    const lineTotal = item.price * item.quantity;
+    if (item.discountType === 'percentage') {
+      return (lineTotal * (item.discount || 0)) / 100;
+    }
+    return item.discount || 0;
+  };
+
+  const calculateItemTotal = (item) => {
+    const lineTotal = item.price * item.quantity;
+    return lineTotal - calculateItemDiscount(item);
+  };
+
+  const subtotal = cart.reduce((sum, item) => sum + calculateItemTotal(item), 0);
+  const totalDiscount = discount;
+  const subtotalAfterDiscount = subtotal - totalDiscount;
+  const subtotalNoTax = subtotalAfterDiscount / (1 + IVA_RATE);
+  const tax = subtotalAfterDiscount - subtotalNoTax;
 
   const handleCheckout = async () => {
     if (cart.length === 0) return toast.error('El carrito está vacío');
     setLoading(true);
     try {
-      const saleData = { items: cart.map(i => ({ product_id: i.product_id, quantity: i.quantity })), payment_method: 'efectivo' };
+      const saleData = { 
+        items: cart.map(i => ({ 
+          product_id: i.product_id, 
+          quantity: i.quantity,
+          price: i.price,
+          discount: calculateItemDiscount(i)
+        })), 
+        payment_method: 'efectivo',
+        discount: totalDiscount
+      };
       const response = await salesAPI.create(saleData);
-      setLastSale(response.data.sale);
+      
+      // Enriquecer la respuesta del backend con los datos del carrito para el ticket
+      const enrichedSale = {
+        ...response.data.sale,
+        items: cart.map(i => ({
+          name: i.name,
+          quantity: i.quantity,
+          price: i.price,
+          discount: calculateItemDiscount(i)
+        })),
+        discount: totalDiscount,
+        subtotal: subtotal,
+        subtotalNoTax: subtotalNoTax,
+        tax: tax,
+        total: subtotalAfterDiscount
+      };
+      
+      setLastSale(enrichedSale);
       setShowTicket(true);
       setCart([]);
+      setDiscount(0);
       toast.success('¡Venta procesada exitosamente!');
       loadProducts();
     } catch {
@@ -126,19 +180,36 @@ const POS = () => {
     const printWindow = window.open('', '_blank', 'width=400,height=700,left=100,top=50,resizable=yes,scrollbars=yes');
     if (!printWindow) return toast.error('No se pudo abrir la ventana de impresión');
 
-    const items = (lastSale.items ?? lastSale.line_items ?? lastSale.details ?? []).map((it, idx) => {
+    const saleItems = lastSale.items ?? lastSale.line_items ?? lastSale.details ?? [];
+    
+    const items = saleItems.map((it, idx) => {
       const name = it.name ?? it.product_name ?? it.product?.name ?? `Producto ${idx+1}`;
       const qty = (it.quantity ?? it.qty ?? it.amount ?? 1);
       const price = (it.price ?? it.unit_price ?? it.product?.price ?? 0);
-      const lineTotal = (price * qty);
+      const itemDiscount = (it.discount ?? 0);
+      const lineTotal = (price * qty) - itemDiscount;
+      
       return `
-        <div style="display:flex; justify-content:space-between; font-size:13px; padding:4px 0;">
-          <div style="width:50%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${name}</div>
-          <div style="width:16%; text-align:right;">${Number(qty).toFixed(3).replace(/\.?0+$/,"")}</div>
-          <div style="width:33%; text-align:right;">$${lineTotal.toFixed(2)}</div>
+        <div style="padding:4px 0;">
+          <div style="display:flex; justify-content:space-between; font-size:13px;">
+            <div style="width:50%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${name}</div>
+            <div style="width:16%; text-align:right;">${Number(qty).toFixed(3).replace(/\.?0+$/,"")}</div>
+            <div style="width:33%; text-align:right;">${lineTotal.toFixed(2)}</div>
+          </div>
+          ${itemDiscount > 0 ? `
+            <div style="font-size:11px; color:#16a34a; text-align:right; padding-right:0;">
+              Desc. producto: -${itemDiscount.toFixed(2)}
+            </div>
+          ` : ''}
         </div>
       `;
     }).join('');
+
+    const saleSubtotal = lastSale.subtotal ?? subtotal;
+    const saleDiscount = lastSale.discount ?? 0;
+    const saleSubtotalNoTax = lastSale.subtotalNoTax ?? subtotalNoTax;
+    const saleTax = lastSale.tax ?? tax;
+    const saleTotal = lastSale.total ?? subtotalAfterDiscount;
 
     const content = `
       <div style="font-family: Arial, sans-serif; font-size: 13px; color:black; width:280px; margin: auto; padding:10px; background:#fff;">
@@ -154,7 +225,6 @@ const POS = () => {
 
         <div style="font-size:13px; solid; margin-bottom:8px;">
           <span style="font-weight:bold;">Ticket #${lastSale.id}</span> - Fecha: ${new Date(lastSale.created_at ?? lastSale.date ?? Date.now()).toLocaleString()}
-
         </div>
 
         <hr style="border: 1px solid gray; width: 100%; margin-top: 8px;">
@@ -171,15 +241,25 @@ const POS = () => {
         <div style="margin-top:12px; font-size:13px;">
           <div style="display:flex; justify-content:space-between;">
             <span>Subtotal:</span>
-            <span>$${(lastSale.total ?? subtotalNoTax).toFixed(2)}</span>
+            <span>${saleSubtotal.toFixed(2)}</span>
+          </div>
+          ${saleDiscount > 0 ? `
+            <div style="display:flex; justify-content:space-between; color:#16a34a; font-weight:bold;">
+              <span>Descuento Total:</span>
+              <span>-${saleDiscount.toFixed(2)}</span>
+            </div>
+          ` : ''}
+          <div style="display:flex; justify-content:space-between;">
+            <span>Subtotal sin IVA:</span>
+            <span>${saleSubtotalNoTax.toFixed(2)}</span>
           </div>
           <div style="display:flex; justify-content:space-between;">
-            <span>Descuento:</span>
-            <span>$${(lastSale.discount ?? 0).toFixed(2)}</span>
+            <span>IVA (21%):</span>
+            <span>${saleTax.toFixed(2)}</span>
           </div>
           <div style="display:flex; justify-content:space-between; font-weight:bold; margin-top:8px;">
             <span>TOTAL:</span>
-            <span>$${(lastSale.total ?? lastSale.amount ?? subtotal).toFixed(2)}</span>
+            <span>${saleTotal.toFixed(2)}</span>
           </div>
         </div>
         <hr style="border: 1px solid gray; width: 100%; margin-top: 8px;">
@@ -373,6 +453,74 @@ const POS = () => {
     toast.success('Producto agregado con precio calculado');
   };
 
+  const openDiscountModal = (productId = null) => {
+    setEditingProductId(productId);
+    if (productId) {
+      const item = cart.find(i => i.product_id === productId);
+      if (item) {
+        setDiscountType(item.discountType || 'percentage');
+        setDiscountValue(item.discount || 0);
+      }
+    } else {
+      setDiscountType('percentage');
+      setDiscountValue(0);
+    }
+    setShowDiscountModal(true);
+  };
+
+  const applyDiscount = () => {
+    const value = parseFloat(discountValue) || 0;
+    
+    if (editingProductId) {
+      // Descuento por producto
+      setCart(cart.map(item => {
+        if (item.product_id === editingProductId) {
+          const lineTotal = item.price * item.quantity;
+          let maxDiscount = lineTotal;
+          
+          if (discountType === 'percentage') {
+            if (value > 100) {
+              toast.error('El descuento no puede ser mayor al 100%');
+              return item;
+            }
+          } else {
+            if (value > maxDiscount) {
+              toast.error(`El descuento no puede ser mayor a $${maxDiscount.toFixed(2)}`);
+              return item;
+            }
+          }
+          
+          return {
+            ...item,
+            discount: value,
+            discountType: discountType
+          };
+        }
+        return item;
+      }));
+      toast.success('Descuento aplicado al producto');
+    } else {
+      // Descuento total
+      if (discountType === 'percentage') {
+        if (value > 100) {
+          toast.error('El descuento no puede ser mayor al 100%');
+          return;
+        }
+        setDiscount((subtotal * value) / 100);
+      } else {
+        if (value > subtotal) {
+          toast.error(`El descuento no puede ser mayor a $${subtotal.toFixed(2)}`);
+          return;
+        }
+        setDiscount(value);
+      }
+      toast.success('Descuento total aplicado');
+    }
+    
+    setShowDiscountModal(false);
+    setDiscountValue(0);
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -453,56 +601,88 @@ const POS = () => {
             {cart.length === 0 ? (
               <p className="text-center text-gray-500 py-8">Carrito vacío</p>
             ) : (
-              cart.map(item => (
-                <div key={item.product_id} className="p-3 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors bg-gray-50">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-sm text-gray-900 truncate">
-                        {item.name}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        ${item.price.toFixed(2)} × {item.quantity}
-                      </p>
-                    </div>
-                    
-                    <div className="flex items-center gap-2">
-                      <button 
-                        onClick={() => updateQuantity(item.product_id, -1)} 
-                        className="w-7 h-7 bg-white border border-gray-300 rounded hover:bg-gray-100 flex items-center justify-center"
-                      >
-                        <Minus size={14} />
-                      </button>
-                      <span className="w-10 text-center font-semibold text-sm">{item.quantity}</span>
-                      <button 
-                        onClick={() => updateQuantity(item.product_id, 1)} 
-                        className="w-7 h-7 bg-white border border-gray-300 rounded hover:bg-gray-100 flex items-center justify-center"
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
+              cart.map(item => {
+                const itemDiscount = calculateItemDiscount(item);
+                const itemTotal = calculateItemTotal(item);
+                return (
+                  <div key={item.product_id} className="p-3 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors bg-gray-50">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-sm text-gray-900 truncate">
+                          {item.name}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          ${item.price.toFixed(2)} × {item.quantity}
+                        </p>
+                        {itemDiscount > 0 && (
+                          <p className="text-xs text-black font-medium">
+                            Desc: -${itemDiscount.toFixed(2)} ({item.discountType === 'percentage' ? `${item.discount}%` : 'fijo'})
+                          </p>
+                        )}
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => updateQuantity(item.product_id, -1)} 
+                          className="w-7 h-7 bg-white border border-gray-300 rounded hover:bg-gray-100 flex items-center justify-center"
+                        >
+                          <Minus size={14} />
+                        </button>
+                        <span className="w-10 text-center font-semibold text-sm">{item.quantity}</span>
+                        <button 
+                          onClick={() => updateQuantity(item.product_id, 1)} 
+                          className="w-7 h-7 bg-white border border-gray-300 rounded hover:bg-gray-100 flex items-center justify-center"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
 
-                    <div className="text-right min-w-[70px]">
-                      <p className="text-base font-bold text-blue-600">
-                        ${(item.price * item.quantity).toFixed(2)}
-                      </p>
-                    </div>
+                      <div className="text-right min-w-[70px]">
+                        {itemDiscount > 0 && (
+                          <p className="text-xs text-black line-through">
+                            ${(item.price * item.quantity).toFixed(2)}
+                          </p>
+                        )}
+                        <p className="text-base font-bold text-blue-600">
+                          ${itemTotal.toFixed(2)}
+                        </p>
+                      </div>
 
-                    <button 
-                      onClick={() => removeFromCart(item.product_id)} 
-                      className="w-7 h-7 bg-red-100 text-red-600 rounded hover:bg-red-200 flex items-center justify-center flex-shrink-0"
-                      title="Eliminar"
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                      <button 
+                        onClick={() => openDiscountModal(item.product_id)} 
+                        className="w-7 h-7 bg-yellow-100 text-yellow-600 rounded hover:bg-yellow-200 flex items-center justify-center flex-shrink-0"
+                        title="Aplicar descuento"
+                      >
+                        %
+                      </button>
+
+                      <button 
+                        onClick={() => removeFromCart(item.product_id)} 
+                        className="w-7 h-7 bg-red-100 text-red-600 rounded hover:bg-red-200 flex items-center justify-center flex-shrink-0"
+                        title="Eliminar"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
           <div className="border-t border-gray-200 pt-4 space-y-2">
             <div className="flex justify-between text-sm">
               <span>Subtotal:</span>
+              <span>${subtotal.toFixed(2)}</span>
+            </div>
+            {totalDiscount > 0 && (
+              <div className="flex justify-between text-sm text-green-600 font-medium">
+                <span>Descuento Total:</span>
+                <span>-${totalDiscount.toFixed(2)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-sm">
+              <span>Subtotal sin IVA:</span>
               <span>${subtotalNoTax.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-sm">
@@ -510,9 +690,17 @@ const POS = () => {
               <span>${tax.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-lg font-bold border-t border-gray-200 pt-2">
-              <span>TOTAL:</span>
-              <span className="text-blue-600">${subtotal.toFixed(2)}</span>
+              <span>TOTAL--:</span>
+              <span className="text-blue-600">${subtotalAfterDiscount.toFixed(2)}</span>
             </div>
+            
+            <button
+              onClick={() => openDiscountModal(null)}
+              disabled={cart.length === 0}
+              className="w-full py-2 bg-yellow-500 text-white rounded-lg font-medium hover:bg-yellow-600 disabled:opacity-50 disabled:bg-gray-300 flex items-center justify-center gap-2"
+            >
+              <Calculator size={16} /> Aplicar Descuento Total
+            </button>
           </div>
 
           <div className="flex gap-2 mt-2">  
@@ -589,6 +777,86 @@ const POS = () => {
         </div>
       )}
 
+      {showDiscountModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-lg">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">
+                {editingProductId ? 'Descuento por Producto' : 'Descuento Total'}
+              </h2>
+              <button onClick={() => setShowDiscountModal(false)} className="text-gray-500 hover:text-gray-700">
+                <X size={22} />
+              </button>
+            </div>
+
+            {editingProductId && (
+              <div className="mb-4">
+                <p className="text-sm text-gray-600">Producto:</p>
+                <p className="font-medium">{cart.find(i => i.product_id === editingProductId)?.name}</p>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm text-gray-600 block mb-2">Tipo de descuento:</label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setDiscountType('percentage')}
+                    className={`flex-1 py-2 rounded-lg border ${
+                      discountType === 'percentage' 
+                        ? 'bg-blue-600 text-white border-blue-600' 
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    Porcentaje (%)
+                  </button>
+                  <button
+                    onClick={() => setDiscountType('fixed')}
+                    className={`flex-1 py-2 rounded-lg border ${
+                      discountType === 'fixed' 
+                        ? 'bg-blue-600 text-white border-blue-600' 
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    Monto Fijo ($)
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-sm text-gray-600">
+                  {discountType === 'percentage' ? 'Porcentaje de descuento:' : 'Monto de descuento:'}
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="w-full border rounded-lg px-3 py-2 mt-1"
+                  value={discountValue}
+                  onChange={(e) => setDiscountValue(e.target.value)}
+                  placeholder={discountType === 'percentage' ? 'Ej: 10 (para 10%)' : 'Ej: 50.00'}
+                />
+              </div>
+
+              <div className="flex gap-3 mt-4">
+                <button 
+                  onClick={() => setShowDiscountModal(false)} 
+                  className="flex-1 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={applyDiscount} 
+                  className="flex-1 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                >
+                  Aplicar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showTicket && lastSale && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-4 w-full max-w-lg shadow-lg flex flex-col" role="dialog" aria-modal="true">
@@ -622,9 +890,10 @@ const POS = () => {
             <div ref={ticketRef} style={{ maxHeight: '52vh', overflowY: 'auto', marginTop: 12 }}>
               <div className="flex justify-between text-sm py-1 border-t border-gray-200 pt-2">
                 <div className="w-1/2 truncate">Producto</div>
+                
+                <div className="w-1/8 text-right">Precio</div>
                 <div className="w-1/6 text-right">Cantidad</div>
-                <div className="w-1/6 text-right">Precio</div>
-                <div className="w-1/6 text-right">Total</div>
+                <div className="w-1/3 text-right">Total</div>
               </div>
 
               <div className="border-t border-gray-200 pt-2">
@@ -637,15 +906,21 @@ const POS = () => {
                     const name = it.name ?? it.product_name ?? it.product?.name ?? `Producto ${idx+1}`;
                     const qty = (it.quantity ?? it.qty ?? it.amount ?? 1);
                     const price = (it.price ?? it.unit_price ?? it.product?.price ?? 0);
-                    const lineTotal = (price * qty);
+                    const itemDiscount = (it.discount ?? 0);
+                    const lineTotal = (price * qty) - itemDiscount;
                     return (
-                      
-                      <div key={idx} className="flex justify-between text-sm py-1  ">
-                        
-
-                        <div className="w-1/2 truncate">{name}</div>
-                        <div className="w-1/6 text-right">{Number(qty).toFixed(3).replace(/\.?0+$/,"")}</div>                      
-                        <div className="w-1/3 text-right">${lineTotal.toFixed(2)}</div>
+                      <div key={idx} className="py-1">
+                        <div className="flex justify-between text-sm">
+                          <div className="w-1/2 truncate">{name}</div>
+                          <div className="w-1/8 text-left">${price.toFixed(2)}</div>
+                          <div className="w-1/6 text-right">{Number(qty).toFixed(3).replace(/\.?0+$/,"")}</div>                      
+                          <div className="w-1/3 text-right">${lineTotal.toFixed(2)}</div>
+                        </div>
+                        {itemDiscount > 0 && (
+                          <div className="text-xs text-black text-right">
+                            Desc. producto: -${itemDiscount.toFixed(2)}
+                          </div>
+                        )}
                       </div>
                     );
                   })
@@ -653,14 +928,20 @@ const POS = () => {
               </div>
 
               <div className="mt-3 text-sm border-t border-gray-200 pt-2">
-                <div className="flex justify-between"><span>Subtotal:</span><span>${(lastSale.subtotal ?? subtotalNoTax).toFixed(2)}</span></div>
-                <div className="flex justify-between"><span>IVA:</span><span>${(lastSale.tax ?? tax).toFixed(2)}</span></div>
-                <div className="flex justify-between font-bold mt-2"><span>TOTAL:</span><span>${(lastSale.total ?? lastSale.amount ?? subtotal).toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>Subtotal:</span><span>${(lastSale.subtotal ?? subtotal).toFixed(2)}</span></div>
+                {(lastSale.discount ?? 0) > 0 && (
+                  <div className="flex justify-between text-green-600 font-bold">
+                    <span>Descuento Total:</span>
+                    <span>-${(lastSale.discount ?? 0).toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between"><span>Subtotal sin IVA:</span><span>${(lastSale.subtotalNoTax ?? subtotalNoTax).toFixed(2)}</span></div>
+                <div className="flex justify-between"><span>IVA (21%):</span><span>${(lastSale.tax ?? tax).toFixed(2)}</span></div>
+                <div className="flex justify-between font-bold mt-2"><span>TOTAL:--</span><span>${(lastSale.total ?? subtotalAfterDiscount).toFixed(2)}</span></div>
               </div>
 
               <div className="border-t border-b-2 border-gray-200 mb-2 mt-2 p-3 text-center">
                 <div className='fs-5'>Forma de pago: {lastSale.payment_method ?? '---'}</div>
-                
               </div>
             </div>
 
