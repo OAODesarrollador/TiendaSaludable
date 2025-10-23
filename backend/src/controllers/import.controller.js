@@ -3,6 +3,8 @@ const fs = require('fs');
 const csv = require('csv-parser');
 const { db } = require('../config/database');
 
+// ===================== Helpers =====================
+
 // Genera un SKU incremental tipo PROD-0001
 const generateNextSku = () => {
   return new Promise((resolve, reject) => {
@@ -42,7 +44,7 @@ const insertProduct = (p) => {
   });
 };
 
-// Verifica si ya existe un producto duplicado (por nombre o SKU)
+// Verifica si ya existe un producto duplicado
 const existsDuplicate = (sku, name) => {
   return new Promise((resolve, reject) => {
     db.get('SELECT id FROM products WHERE sku = ? OR LOWER(TRIM(name)) = LOWER(TRIM(?))', [sku, name], (err, row) => {
@@ -58,7 +60,6 @@ const normalizeNumber = (val) => {
   let clean = String(val)
     .replace(/[^\d,.\-]/g, '') // quita $, espacios, letras
     .trim();
-  // Si tiene tanto punto como coma, asumimos formato latino (13.270,17)
   if (clean.includes('.') && clean.includes(',')) {
     clean = clean.replace(/\./g, '').replace(',', '.');
   } else if (clean.includes(',')) {
@@ -68,6 +69,25 @@ const normalizeNumber = (val) => {
   return isNaN(num) ? 0 : num;
 };
 
+// Normaliza formatos de fecha a ISO (YYYY-MM-DD)
+const normalizeDate = (val) => {
+  if (!val) return null;
+  const clean = String(val).trim().replace(/[.\-]/g, '/');
+  const parts = clean.split('/');
+  if (parts.length === 3) {
+    let [a, b, c] = parts.map(p => p.padStart(2, '0'));
+    if (a.length === 4) return `${a}-${b}-${c}`;          // yyyy/mm/dd
+    if (c.length === 4) {
+      const year = c;
+      const dayFirst = parseInt(a) > 12;                  // heurística
+      return dayFirst ? `${year}-${b}-${a}` : `${year}-${a}-${b}`;
+    }
+  }
+  const parsed = new Date(clean);
+  if (!isNaN(parsed)) return parsed.toISOString().split('T')[0];
+  return null;
+};
+
 // Detecta el separador del CSV
 const detectSeparator = (firstLine) => {
   const commas = (firstLine.match(/,/g) || []).length;
@@ -75,86 +95,43 @@ const detectSeparator = (firstLine) => {
   return semis > commas ? ';' : ',';
 };
 
+// ===================== Importación principal =====================
 exports.importCsv = async (req, res) => {
   let filePath = null;
-  
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No se envió archivo CSV.' });
     }
 
     filePath = req.file.path;
-    
-    console.log('📁 Archivo recibido:', filePath);
-    console.log('📍 req.file completo:', req.file);
-
-    // ✅ VERIFICAR QUE EL ARCHIVO EXISTE
     if (!fs.existsSync(filePath)) {
-      console.error('❌ El archivo no existe en:', filePath);
-      return res.status(500).json({ 
-        error: 'El archivo no se guardó correctamente en el servidor',
-        path: filePath 
-      });
-    }
-
-    // ✅ VERIFICAR PERMISOS DE LECTURA
-    try {
-      fs.accessSync(filePath, fs.constants.R_OK);
-      console.log('✅ Archivo accesible para lectura');
-    } catch (err) {
-      console.error('❌ No hay permisos de lectura:', err);
-      return res.status(500).json({ 
-        error: 'No se puede leer el archivo (permisos)',
-        details: err.message 
-      });
+      return res.status(500).json({ error: 'El archivo no se guardó correctamente.' });
     }
 
     const mapping = req.body.mapping ? JSON.parse(req.body.mapping) : {};
-    console.log('🗺️  Mapeo recibido:', mapping);
-
-    // Detectar separador leyendo la primera línea
     const firstLine = fs.readFileSync(filePath, 'utf8').split('\n')[0];
     const separator = detectSeparator(firstLine);
-    console.log(`🔍 Separador detectado: "${separator}"`);
 
     const rows = [];
-
-    // Crear stream con encoding UTF-8
-    const stream = fs.createReadStream(filePath, { encoding: 'utf8' })
-      .pipe(csv({ 
-        separator: separator,
-        skipEmptyLines: true,
-        trim: true
-      }))
+    fs.createReadStream(filePath, { encoding: 'utf8' })
+      .pipe(csv({ separator, skipEmptyLines: true, trim: true }))
       .on('data', (data) => {
-        // Limpiar BOM y espacios en blanco de las keys
         const cleanData = {};
         for (const key in data) {
           const cleanKey = key.replace(/^\uFEFF/, '').trim();
           cleanData[cleanKey] = data[key] ? data[key].trim() : '';
         }
-        
-        // DEBUG: Mostrar primera fila para verificar headers
-        if (rows.length === 0) {
-          console.log('🔍 DEBUG - Headers detectados en CSV:', Object.keys(cleanData));
-          console.log('🔍 DEBUG - Primera fila de datos:', cleanData);
-          console.log('🔍 DEBUG - Mapeo recibido del frontend:', mapping);
-        }
-        
         rows.push(cleanData);
       })
       .on('end', async () => {
-        console.log(`📊 Total de filas leídas: ${rows.length}`);
-        
+        let totalInserted = 0;
         const results = [];
         let skuCounter = null;
-        let totalInserted = 0;
 
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
           const p = {};
 
-          // Aplicar mapeo
           for (const csvCol in mapping) {
             const dbField = mapping[csvCol];
             if (dbField && row[csvCol] !== undefined) {
@@ -162,22 +139,27 @@ exports.importCsv = async (req, res) => {
             }
           }
 
-          console.log(`\n📦 Fila ${i + 1}:`, p);
-
-          // Validar nombre obligatorio
           if (!p.name || !p.name.trim()) {
             results.push({ row: i + 1, status: 'skipped', reason: 'Nombre vacío' });
-            console.log(`⏭️  Fila ${i + 1}: Saltada (nombre vacío)`);
             continue;
           }
 
-          // Normalizar números
+          // 🔹 Normalización de valores
           p.purchase_price = normalizeNumber(p.purchase_price);
           p.sale_price = normalizeNumber(p.sale_price);
           p.stock = Math.round(normalizeNumber(p.stock));
           p.min_stock = p.min_stock ? Math.round(normalizeNumber(p.min_stock)) : 10;
 
-          // Generar SKU si no existe
+          // 🔹 Normalizar fecha de vencimiento
+          if (p.expiration_date) {
+            const original = p.expiration_date;
+            p.expiration_date = normalizeDate(p.expiration_date);
+            if (!p.expiration_date) {
+              console.warn(`⚠️  Fila ${i + 1}: formato de fecha inválido (${original})`);
+            }
+          }
+
+          // 🔹 Generar SKU si no existe
           if (!p.sku || !p.sku.trim()) {
             if (!skuCounter) {
               const next = await generateNextSku();
@@ -188,35 +170,24 @@ exports.importCsv = async (req, res) => {
             skuCounter++;
           }
 
-          // Verificar duplicados
+          // 🔹 Verificar duplicados
           const dup = await existsDuplicate(p.sku, p.name);
           if (dup) {
             results.push({ row: i + 1, status: 'skipped', reason: 'Duplicado (sku o name)' });
-            console.log(`⏭️  Fila ${i + 1}: Saltada (duplicado)`);
             continue;
           }
 
-          // Insertar producto
           try {
             await insertProduct(p);
             totalInserted++;
             results.push({ row: i + 1, status: 'inserted', sku: p.sku, name: p.name });
-            console.log(`✅ Fila ${i + 1}: Insertado - ${p.name} (${p.sku})`);
           } catch (err) {
             results.push({ row: i + 1, status: 'error', reason: err.message });
-            console.error(`❌ Fila ${i + 1}: Error -`, err.message);
           }
         }
 
-        // Eliminar archivo temporal
-        try {
-          fs.unlinkSync(filePath);
-          console.log('🗑️  Archivo temporal eliminado');
-        } catch (e) {
-          console.error('⚠️  No se pudo eliminar archivo temporal:', e.message);
-        }
-
-        console.log(`\n✅ Importación finalizada: ${totalInserted}/${rows.length} productos insertados`);
+        // 🔹 Eliminar archivo temporal
+        try { fs.unlinkSync(filePath); } catch {}
 
         res.json({
           message: 'Importación finalizada',
@@ -226,20 +197,11 @@ exports.importCsv = async (req, res) => {
         });
       })
       .on('error', (err) => {
-        console.error('❌ Error al leer CSV:', err);
-        // Limpiar archivo en caso de error
-        if (filePath) {
-          try { fs.unlinkSync(filePath); } catch (e) {}
-        }
+        if (filePath) try { fs.unlinkSync(filePath); } catch {}
         res.status(500).json({ error: 'Error al procesar CSV', details: err.message });
       });
-
   } catch (err) {
-    console.error('❌ Error en importación:', err);
-    // Limpiar archivo en caso de error
-    if (filePath) {
-      try { fs.unlinkSync(filePath); } catch (e) {}
-    }
-    res.status(500).json({ error: 'Error interno del servidor', details: err.message });
+    if (filePath) try { fs.unlinkSync(filePath); } catch {}
+    res.status(500).json({ error: 'Error interno', details: err.message });
   }
 };

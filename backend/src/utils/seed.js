@@ -5,7 +5,6 @@ const path = require('path');
 const { db } = require('../config/database');
 const { generateEAN13, generateBarcodeImage } = require('./ean13');
 
-// Función para ejecutar queries con promesas
 const runAsync = (query, params = []) => {
   return new Promise((resolve, reject) => {
     db.run(query, params, function(err) {
@@ -15,13 +14,11 @@ const runAsync = (query, params = []) => {
   });
 };
 
-// Inicializar base de datos (tablas)
 const initializeDatabase = async () => {
   return new Promise((resolve, reject) => {
     db.serialize(() => {
       db.run('PRAGMA foreign_keys = ON');
 
-      // Usuarios
       db.run(`
         CREATE TABLE IF NOT EXISTS users (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,7 +31,6 @@ const initializeDatabase = async () => {
         )
       `);
 
-      // Productos
       db.run(`
         CREATE TABLE IF NOT EXISTS products (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +51,6 @@ const initializeDatabase = async () => {
         )
       `);
 
-      // Ventas
       db.run(`
         CREATE TABLE IF NOT EXISTS sales (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,7 +64,7 @@ const initializeDatabase = async () => {
         )
       `);
 
-      // Items de venta
+      // ✅ Modificada: agregamos discount y discount_type
       db.run(`
         CREATE TABLE IF NOT EXISTS sale_items (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,13 +73,14 @@ const initializeDatabase = async () => {
           product_name TEXT NOT NULL,
           quantity INTEGER NOT NULL,
           unit_price REAL NOT NULL,
+          discount REAL DEFAULT 0,
+          discount_type TEXT DEFAULT 'percentage',
           subtotal REAL NOT NULL,
           FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
           FOREIGN KEY (product_id) REFERENCES products(id)
         )
       `);
 
-      // Devoluciones (nota de crédito)
       db.run(`
         CREATE TABLE IF NOT EXISTS refunds (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -98,7 +94,6 @@ const initializeDatabase = async () => {
         )
       `);
 
-      // Items de devolución
       db.run(`
         CREATE TABLE IF NOT EXISTS refund_items (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -119,27 +114,23 @@ const initializeDatabase = async () => {
   });
 };
 
-// Función para generar fecha de vencimiento aleatoria
 const generateExpirationDate = (minMonths = 3, maxMonths = 24) => {
   const today = new Date();
   const months = Math.floor(Math.random() * (maxMonths - minMonths + 1)) + minMonths;
   const expirationDate = new Date(today);
   expirationDate.setMonth(expirationDate.getMonth() + months);
-  return expirationDate.toISOString().split('T')[0]; // Formato YYYY-MM-DD
+  return expirationDate.toISOString().split('T')[0];
 };
 
-// Seed principal
 const seedDatabase = async () => {
   try {
-    console.log('🌱 Inicializando base de datos y creando tablas...');
+    console.log('🌱 Inicializando base de datos...');
     await initializeDatabase();
     console.log('✅ Tablas listas\n');
 
-    // 1️⃣ Usuarios
     console.log('👤 Creando usuarios...');
     const adminPassword = await bcrypt.hash('admin123', 10);
     const vendedorPassword = await bcrypt.hash('vendedor123', 10);
-
     await runAsync(`
       INSERT OR IGNORE INTO users (username, password, full_name, role) VALUES
       ('admin', ?, 'Administrador', 'admin'),
@@ -147,11 +138,9 @@ const seedDatabase = async () => {
     `, [adminPassword, vendedorPassword]);
     console.log('✅ Usuarios creados\n');
 
-    // 2️⃣ Productos
     console.log('📦 Creando productos...');
     const products = [
       { name: 'Varios', category: 'Varios', purchase: 1, sale: 2, stock: 10000 },
-      
     ];
 
     const barcodeDir = path.join(__dirname, '../../uploads/barcodes');
@@ -181,52 +170,22 @@ const seedDatabase = async () => {
       console.log(`   ✓ ${product.name} (EAN: ${ean13}, Vence: ${expirationDate})`);
     }
 
-    console.log(`\n✅ ${products.length} productos creados con códigos EAN-13 y fechas de vencimiento\n`);
-
-    // 3️⃣ Crear ventas de ejemplo
+    console.log('\n✅ Productos creados con EAN-13\n');
     console.log('💰 Creando ventas de ejemplo...');
-    const salesCount = 1;
 
-    for (let i = 0; i < salesCount; i++) {
-      const subtotal = Math.floor(Math.random() * 4500) + 500;
-      const tax = subtotal * 0.21;
-      const total = subtotal + tax;
+    const sale = await runAsync(`
+      INSERT INTO sales (user_id, subtotal, tax, total, payment_method)
+      VALUES (?, ?, ?, ?, ?)`,
+      [1, 100, 21, 121, 'efectivo']
+    );
 
-      const sale = await runAsync(`
-        INSERT INTO sales (user_id, subtotal, tax, total, payment_method, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `, [
-        Math.random() > 0.5 ? 1 : 2,
-        subtotal,
-        tax,
-        total,
-        Math.random() > 0.5 ? 'efectivo' : 'tarjeta',
-        new Date().toISOString()
-      ]);
+    await runAsync(`
+      INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price, discount, discount_type, subtotal)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `, [sale.id, 1, 'Varios', 2, 50, 10, 'percentage', 90]);
 
-      const itemsCount = Math.floor(Math.random() * 3) + 1;
-      for (let j = 0; j < itemsCount; j++) {
-        const productId = Math.floor(Math.random() * products.length) + 1;
-        const quantity = Math.floor(Math.random() * 3) + 1;
-        const unitPrice = products[productId - 1].sale;
-        const itemSubtotal = unitPrice * quantity;
-
-        await runAsync(`
-          INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price, subtotal)
-          VALUES (?, ?, ?, ?, ?, ?)
-        `, [
-          sale.id, productId, products[productId - 1].name,
-          quantity, unitPrice, itemSubtotal
-        ]);
-
-        // Actualizar stock
-        await runAsync('UPDATE products SET stock = stock - ? WHERE id = ?', [quantity, productId]);
-      }
-    }
-
-    console.log(`✅ ${salesCount} ventas creadas con stock actualizado`);
-
-    console.log('\n🎉 Seed completado exitosamente!');
+    console.log('✅ Ventas de ejemplo creadas');
+    console.log('\n🎉 Seed completado correctamente');
     process.exit(0);
 
   } catch (error) {
@@ -235,5 +194,4 @@ const seedDatabase = async () => {
   }
 };
 
-// Ejecutar seed
 seedDatabase();

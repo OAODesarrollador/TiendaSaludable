@@ -581,53 +581,71 @@ const Products = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {filteredProducts.map((p, idx) => (
-                  <tr
-                    key={p.id}
-                    data-product-id={p.id}
-                    onClick={() => setSelectedProduct(p)}
-                    className={`cursor-pointer transition
-                      ${idx % 2 === 0 ? 'bg-gray-50' : 'bg-gray-100'}
-                      hover:bg-green-50
-                      ${selectedProduct?.id === p.id ? 'bg-green-100 shadow-sm border-l-4 border-green-500' : ''}`}
-                  >
-                    <td className="px-2 py-1">{p.name}</td>
-                    <td className="px-2 py-1 font-mono">
-                      {p.sku}
-                      <br />
-                      <span className="text-xs text-gray-500">{p.ean13}</span>
-                    </td>
-                    <td className="px-2 py-1">{p.category}</td>
-                    <td className="px-2 py-1 text-green-600 font-semibold">${p.sale_price?.toFixed(2)}</td>
-                    <td className="px-2 py-1">{p.stock}</td>
-                    <td className="px-2 py-1">{p.expiration_date}</td>
-                    <td className="px-2 py-1">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleEdit(p);
-                          }}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                          title="Editar"
-                        >
-                          <Edit2 size={16} />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDelete(p.id);
-                          }}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition"
-                          title="Eliminar"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {filteredProducts.map((p, idx) => {
+                  const hoy = new Date();
+                  const vencimiento = p.expiration_date ? new Date(p.expiration_date) : null;
+                  const diasRestantes = vencimiento
+                    ? Math.ceil((vencimiento - hoy) / (1000 * 60 * 60 * 24))
+                    : null;
+
+                  // Si el producto vence dentro de los próximos 7 días
+                  const estaPorVencer = diasRestantes !== null && diasRestantes <= 7 && diasRestantes >= 0;
+
+                  return (
+                    <tr
+                      key={p.id}
+                      data-product-id={p.id}
+                      onClick={() => setSelectedProduct(p)}
+                      className={`cursor-pointer transition
+                        ${idx % 2 === 0 ? 'bg-gray-50' : 'bg-gray-100'}
+                        hover:bg-green-50
+                        ${selectedProduct?.id === p.id ? 'bg-green-100 shadow-sm border-l-4 border-green-500' : ''}
+                        ${estaPorVencer ? 'bg-red-200 animate-pulse' : ''}`}
+                    >
+                      <td className="px-2 py-1">{p.name}</td>
+                      <td className="px-2 py-1 font-mono">
+                        {p.sku}
+                        <br />
+                        <span className="text-xs text-gray-500">{p.ean13}</span>
+                      </td>
+                      <td className="px-2 py-1">{p.category}</td>
+                      <td className="px-2 py-1 text-green-600 font-semibold">${p.sale_price?.toFixed(2)}</td>
+                      <td className="px-2 py-1">{p.stock}</td>
+                      <td className="px-2 py-1 flex items-center gap-1">
+                        {p.expiration_date}
+                        {estaPorVencer && (
+                          <span title="Vence pronto" className="text-red-700 font-bold ml-1">⚠️</span>
+                        )}
+                      </td>
+                      <td className="px-2 py-1">
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEdit(p);
+                            }}
+                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                            title="Editar"
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(p.id);
+                            }}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition"
+                            title="Eliminar"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
+
             </table>
             {filteredProducts.length === 0 && (
               <div className="text-center py-10 text-gray-500">No se encontraron productos</div>

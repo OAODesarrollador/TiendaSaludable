@@ -1,14 +1,41 @@
+// ============================================
+// SALE CONTROLLER (versión final con migración automática y funciones de devolución)
+// ============================================
 const { db, runAsync, getAsync, allAsync } = require('../config/database');
 const PDFDocument = require('pdfkit');
 
 // ============================================
-// CREAR NUEVA VENTA
+// MIGRACIÓN AUTOMÁTICA DE TABLA SALE_ITEMS
+// ============================================
+const ensureSaleItemsColumns = async () => {
+  try {
+    const columns = await allAsync(`PRAGMA table_info(sale_items)`);
+    const columnNames = columns.map(c => c.name);
+
+    if (!columnNames.includes('discount')) {
+      await runAsync(`ALTER TABLE sale_items ADD COLUMN discount REAL DEFAULT 0`);
+      console.log('🛠️ Columna "discount" agregada a sale_items');
+    }
+
+    if (!columnNames.includes('discount_type')) {
+      await runAsync(`ALTER TABLE sale_items ADD COLUMN discount_type TEXT DEFAULT 'percentage'`);
+      console.log('🛠️ Columna "discount_type" agregada a sale_items');
+    }
+  } catch (error) {
+    console.error('❌ Error al verificar o actualizar la estructura de sale_items:', error);
+  }
+};
+
+ensureSaleItemsColumns();
+
+// ============================================
+// CREAR NUEVA VENTA (usa precio y descuento del POS)
 // ============================================
 const createSale = async (req, res) => {
   try {
     const { items, payment_method = 'efectivo' } = req.body;
-    const userId = req.user.id;
-    
+    const userId = req.user?.id || 1;
+
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'No hay productos en la venta' });
     }
@@ -19,10 +46,9 @@ const createSale = async (req, res) => {
       let subtotal = 0;
       const saleItems = [];
 
-      // Verificar stock y calcular totales
       for (const item of items) {
         const product = await getAsync(
-          'SELECT id, name, sale_price, stock FROM products WHERE id = ? AND active = 1',
+          'SELECT id, name, stock FROM products WHERE id = ? AND active = 1',
           [item.product_id]
         );
 
@@ -36,26 +62,38 @@ const createSale = async (req, res) => {
           return res.status(400).json({ error: `Stock insuficiente para ${product.name}. Disponible: ${product.stock}` });
         }
 
-        const itemSubtotal = product.sale_price * item.quantity;
+        const unit_price = parseFloat(item.price) || 0;
+        const qty = parseFloat(item.quantity) || 0;
+        const discountType = item.discountType || 'percentage';
+        const discountValue = parseFloat(item.discount) || 0;
+
+        let discountAmount = 0;
+        if (discountType === 'percentage') {
+          discountAmount = (unit_price * qty * discountValue) / 100;
+        } else if (discountType === 'fixed') {
+          discountAmount = discountValue;
+        }
+
+        const itemSubtotal = (unit_price * qty) - discountAmount;
         subtotal += itemSubtotal;
 
         saleItems.push({
           product_id: product.id,
           product_name: product.name,
-          quantity: item.quantity,
-          unit_price: product.sale_price,
+          quantity: qty,
+          unit_price,
+          discount: discountValue,
+          discount_type: discountType,
           subtotal: itemSubtotal
         });
-        
-        await runAsync('UPDATE products SET stock = stock - ? WHERE id = ?', [item.quantity, product.id]);
+
+        await runAsync('UPDATE products SET stock = stock - ? WHERE id = ?', [qty, product.id]);
       }
 
       const taxRate = parseFloat(process.env.IVA_RATE || 21) / 100;
       const totalNoTax = subtotal / (1 + taxRate);
       const tax = subtotal - totalNoTax;
-      const total =  totalNoTax + tax;
-
-
+      const total = totalNoTax + tax;
 
       const saleResult = await runAsync(
         'INSERT INTO sales (user_id, subtotal, tax, total, payment_method) VALUES (?, ?, ?, ?, ?)',
@@ -66,9 +104,18 @@ const createSale = async (req, res) => {
 
       for (const item of saleItems) {
         await runAsync(
-          `INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price, subtotal)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [saleId, item.product_id, item.product_name, item.quantity, item.unit_price, item.subtotal]
+          `INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price, discount, discount_type, subtotal)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            saleId,
+            item.product_id,
+            item.product_name,
+            item.quantity,
+            item.unit_price,
+            item.discount,
+            item.discount_type,
+            item.subtotal
+          ]
         );
       }
 
@@ -140,7 +187,6 @@ const getAllSales = async (req, res) => {
 const getSaleById = async (req, res) => {
   try {
     const { id } = req.params;
-
     const sale = await getAsync(`
       SELECT s.*, u.full_name as seller_name 
       FROM sales s 
@@ -161,7 +207,7 @@ const getSaleById = async (req, res) => {
 };
 
 // ============================================
-// NUEVO: CREAR NOTA DE CRÉDITO (DEVOLUCIÓN)
+// CREAR NOTA DE CRÉDITO / DEVOLUCIÓN
 // ============================================
 const createRefund = async (req, res) => {
   try {
@@ -255,7 +301,7 @@ const createRefund = async (req, res) => {
 };
 
 // ============================================
-// OBTENER DEVOLUCIONES DE UNA VENTA
+// OBTENER TODAS LAS DEVOLUCIONES DE UNA VENTA
 // ============================================
 const getRefundsBySale = async (req, res) => {
   try {
@@ -272,7 +318,7 @@ const getRefundsBySale = async (req, res) => {
 };
 
 // ============================================
-// OBTENER UNA NOTA DE CRÉDITO POR ID
+// OBTENER DETALLE DE UNA NOTA DE CRÉDITO POR ID
 // ============================================
 const getRefundById = async (req, res) => {
   try {
@@ -289,7 +335,7 @@ const getRefundById = async (req, res) => {
 };
 
 // ============================================
-// GENERAR PDF DEL TICKET
+// GENERAR PDF DE TICKET
 // ============================================
 const generateTicketPDF = async (req, res) => {
   try {
@@ -326,7 +372,10 @@ const generateTicketPDF = async (req, res) => {
     doc.fontSize(8);
     items.forEach(item => {
       doc.text(item.product_name);
-      doc.text(`  ${item.quantity} x $${item.unit_price.toFixed(2)} = $${item.subtotal.toFixed(2)}`);
+      let line = `  ${item.quantity} x $${item.unit_price.toFixed(2)}`;
+      if (item.discount > 0) line += ` (-${item.discount}${item.discount_type === 'percentage' ? '%' : ''})`;
+      line += ` = $${item.subtotal.toFixed(2)}`;
+      doc.text(line);
       doc.moveDown(0.3);
     });
 
@@ -335,7 +384,7 @@ const generateTicketPDF = async (req, res) => {
     doc.moveDown(0.5);
     doc.fontSize(9);
     doc.text(`Subtotal: $${sale.subtotal.toFixed(2)}`, { align: 'right' });
-    doc.text(`IVA (${process.env.IVA_RATE}%): $${sale.tax.toFixed(2)}`, { align: 'right' });
+    doc.text(`IVA (${process.env.IVA_RATE || 21}%): $${sale.tax.toFixed(2)}`, { align: 'right' });
     doc.fontSize(11).text(`TOTAL: $${sale.total.toFixed(2)}`, { align: 'right' });
 
     doc.moveDown(1);
@@ -349,6 +398,9 @@ const generateTicketPDF = async (req, res) => {
   }
 };
 
+// ============================================
+// EXPORTS
+// ============================================
 module.exports = {
   createSale,
   getAllSales,

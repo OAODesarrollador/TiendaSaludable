@@ -1,17 +1,26 @@
 // ============================================
 // REPORT ROUTES (report.routes.js)
 // ============================================
-const express4 = require('express');
-const router4 = express4.Router();
+const express = require('express');
+const router = express.Router();
 const {
   getSalesReport,
   exportToCSV,
-  exportToPDF
+  exportToPDF,
+  getExpiringProductsReport,
+  exportExpiringCSV,
+  exportExpiringPDF
 } = require('../controllers/report.controller');
-const { verifyToken: verifyToken4 } = require('../middleware/auth');
+const { verifyToken } = require('../middleware/auth');
 
-router4.get('/sales', verifyToken4, getSalesReport);
-router4.get('/export/csv', verifyToken4, exportToCSV);
-router4.get('/export/pdf', verifyToken4, exportToPDF);
+// Ventas
+router.get('/sales', verifyToken, getSalesReport);
+router.get('/export/csv', verifyToken, exportToCSV);
+router.get('/export/pdf', verifyToken, exportToPDF);
 
-module.exports = router4;
+// Vencimientos
+router.get('/expiring', verifyToken, getExpiringProductsReport);
+router.get('/export/expiring-csv', verifyToken, exportExpiringCSV);
+router.get('/export/expiring-pdf', verifyToken, exportExpiringPDF);
+
+module.exports = router;

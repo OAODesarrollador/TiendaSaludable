@@ -1,15 +1,25 @@
 import { useState, useEffect } from 'react';
 import { reportsAPI, productsAPI } from '../services/api';
 import { toast } from 'react-toastify';
-import { Download, FileText, Calendar, Filter } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
+import { Download, FileText, Calendar } from 'lucide-react';
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer
+} from 'recharts';
 
 const Reports = () => {
   const [reportData, setReportData] = useState(null);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(false);
-  
+
   const [filters, setFilters] = useState({
+    reportType: 'sales',
     period: 'month',
     start_date: '',
     end_date: '',
@@ -29,52 +39,72 @@ const Reports = () => {
       console.error('Error cargando categorías:', error);
     }
   };
-
-  const generateReport = async () => {
-    setLoading(true);
-    try {
-      const params = {};
-      
-      if (filters.period !== 'custom') {
-        params.period = filters.period;
-      } else if (filters.start_date && filters.end_date) {
-        params.start_date = filters.start_date;
-        params.end_date = filters.end_date;
-      }
-      
-      if (filters.category) {
-        params.category = filters.category;
-      }
-
-      const response = await reportsAPI.getSalesReport(params);
-      setReportData(response.data);
-    } catch (error) {
-      console.error('Error generando reporte:', error);
-      toast.error('Error al generar reporte');
-    } finally {
-      setLoading(false);
+// ...imports iguales
+const generateReport = async () => {
+  // Validación previa
+  if (filters.period === 'custom') {
+    if (!filters.start_date || !filters.end_date) {
+      toast.warning('Debe seleccionar una fecha de inicio y una de fin para el reporte personalizado.');
+      return;
     }
-  };
+    if (filters.start_date > filters.end_date) {
+      toast.warning('La fecha de inicio no puede ser mayor a la fecha de fin.');
+      return;
+    }
+  }
+
+  setLoading(true);
+  try {
+    const params = {};
+    if (filters.period) params.period = filters.period;
+    if (filters.category) params.category = filters.category;
+    if (filters.period === 'custom') {
+      params.start_date = filters.start_date;
+      params.end_date = filters.end_date;
+    }
+
+    const response =
+      filters.reportType === 'expiring'
+        ? await reportsAPI.getExpiringProducts(params)
+        : await reportsAPI.getSalesReport(params);
+
+    setReportData(response.data);
+  } catch (error) {
+    console.error('Error generando reporte:', error);
+    const msg = error?.response?.data?.error || 'Error al generar reporte';
+    toast.error(msg);
+  } finally {
+    setLoading(false);
+  }
+};
+
+
 
   const handleExportCSV = async () => {
     try {
       const params = {};
-      if (filters.period !== 'custom') {
-        params.period = filters.period;
-      } else if (filters.start_date && filters.end_date) {
+      if (filters.period) params.period = filters.period;
+      if (filters.category) params.category = filters.category;
+      if (filters.period === 'custom' && filters.start_date && filters.end_date) {
         params.start_date = filters.start_date;
         params.end_date = filters.end_date;
       }
-      if (filters.category) {
-        params.category = filters.category;
+
+      let response;
+      if (filters.reportType === 'expiring') {
+        response = await reportsAPI.exportExpiringCSV(params);
+      } else {
+        response = await reportsAPI.exportCSV(params);
       }
 
-      const response = await reportsAPI.exportCSV(params);
       const blob = new Blob([response.data], { type: 'text/csv' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `reporte_ventas_${Date.now()}.csv`;
+      link.download =
+        filters.reportType === 'expiring'
+          ? `reporte_vencimientos_${Date.now()}.csv`
+          : `reporte_ventas_${Date.now()}.csv`;
       link.click();
       window.URL.revokeObjectURL(url);
       toast.success('Reporte CSV descargado');
@@ -87,19 +117,28 @@ const Reports = () => {
   const handleExportPDF = async () => {
     try {
       const params = {};
-      if (filters.period !== 'custom') {
-        params.period = filters.period;
-      } else if (filters.start_date && filters.end_date) {
+      if (filters.period) params.period = filters.period;
+      if (filters.category) params.category = filters.category;
+      if (filters.period === 'custom' && filters.start_date && filters.end_date) {
         params.start_date = filters.start_date;
         params.end_date = filters.end_date;
       }
 
-      const response = await reportsAPI.exportPDF(params);
+      let response;
+      if (filters.reportType === 'expiring') {
+        response = await reportsAPI.exportExpiringPDF(params);
+      } else {
+        response = await reportsAPI.exportPDF(params);
+      }
+
       const blob = new Blob([response.data], { type: 'application/pdf' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `reporte_ventas_${Date.now()}.pdf`;
+      link.download =
+        filters.reportType === 'expiring'
+          ? `reporte_vencimientos_${Date.now()}.pdf`
+          : `reporte_ventas_${Date.now()}.pdf`;
       link.click();
       window.URL.revokeObjectURL(url);
       toast.success('Reporte PDF descargado');
@@ -113,37 +152,71 @@ const Reports = () => {
     setFilters({ ...filters, [e.target.name]: e.target.value });
   };
 
-  // Preparar datos para gráficos
-  const chartDataByCategory = reportData ? 
-    Object.entries(reportData.stats.by_category).map(([category, data]) => ({
-      category,
-      revenue: data.revenue,
-      units: data.units
-    })) : [];
+  // Datos para los gráficos
+  const chartDataByCategory =
+    reportData && filters.reportType === 'sales'
+      ? Object.entries(reportData.stats.by_category).map(([category, data]) => ({
+          category,
+          revenue: data.revenue,
+          units: data.units
+        }))
+      : [];
 
-  const chartDataByProduct = reportData ?
-    Object.entries(reportData.stats.by_product)
-      .sort((a, b) => b[1].revenue - a[1].revenue)
-      .slice(0, 10)
-      .map(([product, data]) => ({
-        product: product.length > 20 ? product.substring(0, 20) + '...' : product,
-        revenue: data.revenue,
-        units: data.units
-      })) : [];
+  const chartDataByProduct =
+    reportData && filters.reportType === 'sales'
+      ? Object.entries(reportData.stats.by_product)
+          .sort((a, b) => b[1].revenue - a[1].revenue)
+          .slice(0, 10)
+          .map(([product, data]) => ({
+            product: product.length > 20 ? product.substring(0, 20) + '...' : product,
+            revenue: data.revenue,
+            units: data.units
+          }))
+      : [];
 
-  const COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
+  // Preprocesar datos de vencimientos con keys seguras
+  const expiringData =
+    reportData?.data?.map((p, idx) => ({
+      ...p,
+      uuid: p.id || `${p.sku || 'prod'}-${idx}`
+    })) || [];
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Reportes de Ventas</h1>
-        <p className="text-gray-600 mt-1">Análisis detallado y exportación de datos</p>
+        <h1 className="text-3xl font-bold text-gray-900">
+          {filters.reportType === 'expiring'
+            ? 'Reporte de Vencimientos'
+            : 'Reportes de Ventas'}
+        </h1>
+        <p className="text-gray-600 mt-1">
+          {filters.reportType === 'expiring'
+            ? 'Consulta los productos que se vencen por fecha o rango personalizado'
+            : 'Análisis detallado y exportación de ventas'}
+        </p>
       </div>
 
       {/* Filtros */}
       <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          {/* Tipo de reporte */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Tipo de Reporte
+            </label>
+            <select
+              name="reportType"
+              value={filters.reportType}
+              onChange={handleFilterChange}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            >
+              <option value="sales">Ventas</option>
+              <option value="expiring">Vencimientos</option>
+            </select>
+          </div>
+
+          {/* Período */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Período
@@ -154,14 +227,27 @@ const Reports = () => {
               onChange={handleFilterChange}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
             >
-              <option value="today">Hoy</option>
-              <option value="week">Última Semana</option>
-              <option value="month">Último Mes</option>
-              <option value="year">Último Año</option>
-              <option value="custom">Personalizado</option>
+              {filters.reportType === 'expiring' ? (
+                <>
+                  <option value="today">Hoy</option>
+                  <option value="tomorrow">Mañana</option>
+                  <option value="week">Esta Semana</option>
+                  <option value="month">Este Mes</option>
+                  <option value="custom">Personalizado</option>
+                </>
+              ) : (
+                <>
+                  <option value="today">Hoy</option>
+                  <option value="week">Última Semana</option>
+                  <option value="month">Último Mes</option>
+                  <option value="year">Último Año</option>
+                  <option value="custom">Personalizado</option>
+                </>
+              )}
             </select>
           </div>
 
+          {/* Fechas personalizadas */}
           {filters.period === 'custom' && (
             <>
               <div>
@@ -176,7 +262,6 @@ const Reports = () => {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
                 />
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Fecha Fin
@@ -192,23 +277,29 @@ const Reports = () => {
             </>
           )}
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Categoría
-            </label>
-            <select
-              name="category"
-              value={filters.category}
-              onChange={handleFilterChange}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-            >
-              <option value="">Todas</option>
-              {categories.map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
-          </div>
+          {/* Categoría */}
+          {filters.reportType === 'sales' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Categoría
+              </label>
+              <select
+                name="category"
+                value={filters.category}
+                onChange={handleFilterChange}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              >
+                <option value="">Todas</option>
+                {categories.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
+          {/* Botón generar */}
           <div className="flex items-end gap-2">
             <button
               onClick={generateReport}
@@ -241,160 +332,41 @@ const Reports = () => {
         </div>
       )}
 
-      {/* Resumen de estadísticas */}
-      {reportData && (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-              <p className="text-sm font-medium text-gray-600">Total Transacciones</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">
-                {reportData.stats.total_transactions}
-              </p>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-              <p className="text-sm font-medium text-gray-600">Ingresos Totales</p>
-              <p className="text-3xl font-bold text-primary-600 mt-2">
-                ${reportData.stats.total_revenue.toFixed(2)}
-              </p>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-              <p className="text-sm font-medium text-gray-600">Unidades Vendidas</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">
-                {reportData.stats.total_items}
-              </p>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-              <p className="text-sm font-medium text-gray-600">Ticket Promedio</p>
-              <p className="text-3xl font-bold text-gray-900 mt-2">
-                ${reportData.stats.avg_ticket.toFixed(2)}
-              </p>
-            </div>
-          </div>
-
-          {/* Gráficos */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Ventas por categoría */}
-            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">
-                Ingresos por Categoría
-              </h2>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={chartDataByCategory}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="category" angle={-45} textAnchor="end" height={100} fontSize={12} />
-                  <YAxis />
-                  <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
-                  <Legend />
-                  <Bar dataKey="revenue" name="Ingresos" fill="#22c55e" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Top 10 productos */}
-            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">
-                Top 10 Productos por Ingresos
-              </h2>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={chartDataByProduct} layout="vertical">
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis type="number" />
-                  <YAxis dataKey="product" type="category" width={150} fontSize={11} />
-                  <Tooltip formatter={(value) => `$${value.toFixed(2)}`} />
-                  <Bar dataKey="revenue" name="Ingresos" fill="#3b82f6" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* Tabla detallada */}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="p-6 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">
-                Detalle de Ventas ({reportData.data.length} registros)
-              </h2>
-            </div>
-            
-            <div className="overflow-x-auto max-h-96">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50 sticky top-0">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Fecha
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Producto
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Categoría
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Cantidad
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      P. Unitario
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Subtotal
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Pago
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {reportData.data.map((row, index) => (
-                    <tr key={index} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {new Date(row.created_at).toLocaleDateString('es-AR')}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-900">
-                        {row.product_name}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="px-2 py-1 text-xs font-medium bg-primary-100 text-primary-700 rounded-full">
-                          {row.category}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-center">
-                        {row.quantity}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        ${row.unit_price.toFixed(2)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-primary-600">
-                        ${row.item_subtotal.toFixed(2)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 capitalize">
-                        {row.payment_method}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Resumen por método de pago */}
-          <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">
-              Ventas por Método de Pago
+      {/* Contenido condicional */}
+      {filters.reportType === 'expiring' && reportData && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="p-6 border-b border-gray-200">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Productos próximos a vencer ({expiringData.length})
             </h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {Object.entries(reportData.stats.by_payment_method).map(([method, total]) => (
-                <div key={method} className="p-4 bg-gray-50 rounded-lg">
-                  <p className="text-sm font-medium text-gray-600 capitalize">{method}</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-2">
-                    ${total.toFixed(2)}
-                  </p>
-                </div>
-              ))}
-            </div>
           </div>
-        </>
+          <div className="overflow-x-auto max-h-96">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50 sticky top-0">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">SKU</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nombre</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Categoría</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stock</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Vencimiento</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {expiringData.map((p) => (
+                  <tr key={p.uuid} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 text-sm text-gray-900">{p.sku}</td>
+                    <td className="px-6 py-4 text-sm text-gray-900">{p.name}</td>
+                    <td className="px-6 py-4 text-sm text-gray-900">{p.category}</td>
+                    <td className="px-6 py-4 text-sm text-gray-900 text-center">{p.stock}</td>
+                    <td className="px-6 py-4 text-sm font-semibold text-red-600">
+                      {new Date(p.expiration_date).toLocaleDateString('es-AR')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {!reportData && !loading && (

@@ -131,20 +131,26 @@ const POS = () => {
   const subtotalNoTax = subtotalAfterDiscount / (1 + IVA_RATE);
   const tax = subtotalAfterDiscount - subtotalNoTax;
 
+  // ===========================
+  // MODIFICADO: enviar price/discount al backend
+  // ===========================
   const handleCheckout = async () => {
     if (cart.length === 0) return toast.error('El carrito está vacío');
     setLoading(true);
     try {
       const saleData = { 
-        items: cart.map(i => ({ 
+        items: cart.map(i => ({
           product_id: i.product_id, 
           quantity: i.quantity,
-          price: i.price,
-          discount: calculateItemDiscount(i)
-        })), 
-        payment_method: 'efectivo',
-        discount: totalDiscount
+          price: i.price,                      // ✅ precio real usado en POS
+          discount: i.discount || 0,           // ✅ valor de descuento
+          discountType: i.discountType || 'percentage' // ✅ tipo de descuento
+        })),
+        // Descuento global opcional (si lo usás):
+        order_discount: totalDiscount || 0,     // ✅ descuento total aplicado en el carrito
+        payment_method: 'efectivo'
       };
+      
       const response = await salesAPI.create(saleData);
       
       // Enriquecer la respuesta del backend con los datos del carrito para el ticket
@@ -555,7 +561,12 @@ const POS = () => {
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 gap-3 max-h-96 overflow-y-auto">
-              {filteredProducts.map(product => (
+              {products
+                .filter(p =>
+                  p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                  p.sku.toLowerCase().includes(searchTerm.toLowerCase())
+                )
+                .map(product => (
                 <div
                   key={product.id}
                   className="p-3 border border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
@@ -690,7 +701,7 @@ const POS = () => {
               <span>${tax.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-lg font-bold border-t border-gray-200 pt-2">
-              <span>TOTAL--:</span>
+              <span>TOTAL:</span>
               <span className="text-blue-600">${subtotalAfterDiscount.toFixed(2)}</span>
             </div>
             
@@ -937,7 +948,7 @@ const POS = () => {
                 )}
                 <div className="flex justify-between"><span>Subtotal sin IVA:</span><span>${(lastSale.subtotalNoTax ?? subtotalNoTax).toFixed(2)}</span></div>
                 <div className="flex justify-between"><span>IVA (21%):</span><span>${(lastSale.tax ?? tax).toFixed(2)}</span></div>
-                <div className="flex justify-between font-bold mt-2"><span>TOTAL:--</span><span>${(lastSale.total ?? subtotalAfterDiscount).toFixed(2)}</span></div>
+                <div className="flex justify-between font-bold mt-2"><span>TOTAL:</span><span>${(lastSale.total ?? subtotalAfterDiscount).toFixed(2)}</span></div>
               </div>
 
               <div className="border-t border-b-2 border-gray-200 mb-2 mt-2 p-3 text-center">
