@@ -4,6 +4,7 @@
   "description": "Meta proyecto: usar start.bat para instalar/ejecutar",
   "license": "MIT",
   "dependencies": {
-    "@ericblade/quagga2": "^1.8.4"
+    "@ericblade/quagga2": "^1.8.4",
+    "exceljs": "^4.4.0"
   }
 }

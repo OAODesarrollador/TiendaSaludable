@@ -7,6 +7,7 @@ import Barcode from 'react-barcode';
 
 import ProductModal from '../components/ProductModal';
 import BarcodeScanner from '../components/BarcodeScanner';
+import '../styles/Layout.css'
 
 const Products = () => {
   const [products, setProducts] = useState([]);
@@ -514,6 +515,46 @@ const Products = () => {
           <div className="flex justify-between items-center mb-4">
             <h1 className="text-2xl font-semibold text-gray-900">Productos</h1>
             <div className="flex items-center gap-2">
+            <button
+              onClick={async () => {
+                try {
+                  const token = localStorage.getItem('token');
+                  const response = await fetch(`${import.meta.env.VITE_API_URL}/products/export`, {
+                    method: 'GET',
+                    headers: { Authorization: `Bearer ${token}` }
+                  });
+
+                  // Verificar tipo de contenido para NO descargar JSON/HTML como .xlsx
+                  const ct = response.headers.get('Content-Type') || '';
+                  if (!response.ok || !ct.includes('application')) {
+                    // Leer texto de error y mostrarlo
+                    const text = await response.text();
+                    console.error('Respuesta de exportación:', text);
+                    const msg = text || 'Error al exportar productos';
+                    console.log('Mensaje de error:', msg);
+                    alert(msg);
+                    return;
+                  }
+
+                  const blob = await response.blob();
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = 'productos.xlsx';
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                  window.URL.revokeObjectURL(url);
+                } catch (error) {
+                  console.error('Error exportando Excel:', error);
+                  alert('No se pudo exportar el archivo');
+                }
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition"
+            >
+              📤 Exportar Excel
+            </button>
+
               {/* Botón para abrir escáner */}
               <button
                 onClick={() => setShowScanner(true)}
@@ -531,6 +572,7 @@ const Products = () => {
               </button>
             </div>
           </div>
+          
 
           {/* Filtros */}
           <div className="flex flex-col md:flex-row gap-4 mb-4">

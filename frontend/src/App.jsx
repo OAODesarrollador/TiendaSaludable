@@ -15,6 +15,9 @@ import Sales from './pages/Sales';
 import Reports from './pages/Reports';
 import Layout from './components/Layout';
 import Importador from './components/Importador';
+import ImportarProductos from './components/ImportarProductos';
+import ActualizarPrecios from './components/actualizarPrecios';
+
 
 // Componente de ruta protegida
 const PrivateRoute = ({ children }) => {
@@ -42,17 +45,19 @@ function App() {
         <Route path="/login" element={<Login />} />
         
         <Route path="/" element={
-          <PrivateRoute>
-            <Layout />
-          </PrivateRoute>
-        }>
-          <Route index element={<Dashboard />} />
-          <Route path="pos" element={<POS />} />
-          <Route path="products" element={<Products />} />
-          <Route path="sales" element={<Sales />} />
-          <Route path="reports" element={<Reports />} />
-          <Route path="importador" element={<Importador />} />
-        </Route>
+            <PrivateRoute>
+              <Layout />
+            </PrivateRoute>
+          }>
+            <Route index element={<Dashboard />} />
+            <Route path="pos" element={<POS />} />
+            <Route path="products" element={<Products />} />
+            <Route path="sales" element={<Sales />} />
+            <Route path="reports" element={<Reports />} />
+            <Route path="importador" element={<Importador />} />
+            <Route path="importador/productos" element={<ImportarProductos />} />
+            <Route path="importador/precios" element={<ActualizarPrecios />} />
+          </Route>
       </Routes>
     </BrowserRouter>
   );

@@ -131,6 +131,16 @@ const POS = () => {
   const subtotalNoTax = subtotalAfterDiscount / (1 + IVA_RATE);
   const tax = subtotalAfterDiscount - subtotalNoTax;
 
+
+  // ===========================
+  const isExpiringSoon = (expirationDate) => {
+  if (!expirationDate) return false;
+  const today = new Date();
+  const expireDate = new Date(expirationDate);
+  const diffDays = (expireDate - today) / (1000 * 60 * 60 * 24);
+  return diffDays >= 0 && diffDays <= 7;
+};
+
   // ===========================
   // MODIFICADO: enviar price/discount al backend
   // ===========================
@@ -567,34 +577,46 @@ const POS = () => {
                   p.sku.toLowerCase().includes(searchTerm.toLowerCase())
                 )
                 .map(product => (
-                <div
-                  key={product.id}
-                  className="p-3 border border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-colors"
-                >
-                  <p className="font-medium text-sm text-gray-900 truncate">
-                    {product.name}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">{product.category}</p>
-                  <p className="text-lg font-bold text-blue-600 mt-2">
-                    ${product.sale_price.toFixed(2)}
-                  </p>
-                  <p className="text-xs text-gray-500 mb-2">Stock: {product.stock}</p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => addToCart(product)}
-                      className="flex-1 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
-                    >
-                      Agregar
-                    </button>
-                    <button
-                      onClick={() => openCalculator(product)}
-                      className="flex-1 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 flex items-center justify-center gap-1 text-sm"
-                    >
-                      <Calculator size={14} /> Kg/Lt
-                    </button>
+                  <div
+                    key={product.id}
+                    className={`p-3 border rounded-lg transition-colors ${
+                      isExpiringSoon(product.expiration_date)
+                        ? 'border-red-500 bg-red-100 hover:bg-red-200'
+                        : 'border-gray-200 hover:border-blue-500 hover:bg-blue-50'
+                    }`}
+                  >
+                    <p className="font-medium text-sm text-gray-900 truncate">
+                      {product.name}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">{product.category}</p>
+                    <p className="text-lg font-bold text-blue-600 mt-2">
+                      ${product.sale_price.toFixed(2)}
+                    </p>
+                    <p className="text-xs text-gray-500 mb-2">Stock: {product.stock}</p>
+
+                    {isExpiringSoon(product.expiration_date) && (
+                      <p className="text-xs text-red-700 font-semibold mt-1 flex items-center gap-1">
+                        ⚠️ Vence pronto ({new Date(product.expiration_date).toLocaleDateString('es-AR')})
+                      </p>
+                    )}
+
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={() => addToCart(product)}
+                        className="flex-1 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
+                      >
+                        Agregar
+                      </button>
+                      <button
+                        onClick={() => openCalculator(product)}
+                        className="flex-1 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 flex items-center justify-center gap-1 text-sm"
+                      >
+                        <Calculator size={14} /> Kg/Lt
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+
             </div>
           </div>
         </div>

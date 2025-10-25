@@ -15,6 +15,9 @@ const {
   getLowStockProducts
 } = require('../controllers/product.controller');
 const { verifyToken: verifyToken2, isAdmin } = require('../middleware/auth');
+const { exportProductsToExcel } = require('../controllers/product.controller');
+
+router2.get('/export', verifyToken2, exportProductsToExcel);
 
 router2.get('/', verifyToken2, getAllProducts);
 router2.get('/categories', verifyToken2, getCategories);

@@ -1,7 +1,10 @@
 const { runAsync, getAsync, allAsync } = require('../config/database');
 const { generateEAN13, validateEAN13, generateBarcodeImage, generateBarcodeSVG } = require('../utils/ean13');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 
+const ExcelJS = require('exceljs');
 // Obtener todos los productos
 const getAllProducts = async (req, res) => {
   try {
@@ -279,6 +282,67 @@ const getLowStockProducts = async (req, res) => {
     res.status(500).json({ error: 'Error al obtener productos' });
   }
 };
+// Requiere estas dependencias arriba del archivo:
+
+
+// ============================================
+// Exportar productos a Excel (versión robusta con archivo temporal)
+// ============================================
+const exportProductsToExcel = async (req, res) => {
+  try {
+    const products = await allAsync(`
+      SELECT sku, ean13, name, purchase_price, sale_price 
+      FROM products
+      WHERE active = 1
+      ORDER BY name ASC
+    `);
+
+    if (!products || products.length === 0) {
+      return res.status(404).json({ error: 'No hay productos para exportar' });
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Productos');
+
+    worksheet.columns = [
+      { header: 'SKU', key: 'sku', width: 15 },
+      { header: 'EAN-13', key: 'ean13', width: 20 },
+      { header: 'Nombre', key: 'name', width: 40 },
+      { header: 'Precio Compra', key: 'purchase_price', width: 15 },
+      { header: 'Precio Venta', key: 'sale_price', width: 15 }
+    ];
+
+    products.forEach((p) => worksheet.addRow(p));
+
+    // Estilos mínimos
+    worksheet.getRow(1).font = { bold: true };
+    worksheet.getColumn('purchase_price').numFmt = '"$"#,##0.00';
+    worksheet.getColumn('sale_price').numFmt = '"$"#,##0.00';
+
+    // 1) Crear ruta temporal
+    const tmpDir = os.tmpdir();
+    const fileName = `productos_${Date.now()}.xlsx`;
+    const tempPath = path.join(tmpDir, fileName);
+
+    // 2) Escribir el archivo en disco
+    await workbook.xlsx.writeFile(tempPath);
+
+    // 3) Descargar el archivo (Express maneja cabeceras y stream binario)
+    res.download(tempPath, 'productos.xlsx', (err) => {
+      // 4) Borrar el temporal pase lo que pase
+      fs.unlink(tempPath, () => {});
+      if (err && !res.headersSent) {
+        res.status(500).json({ error: 'Error al descargar Excel' });
+      }
+    });
+  } catch (error) {
+    console.error('Error exportando productos:', error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Error al exportar productos' });
+    }
+  }
+};
+
 
 module.exports = {
   getAllProducts,
@@ -289,5 +353,6 @@ module.exports = {
   deleteProduct,
   getCategories,
   getBarcodeImage,
-  getLowStockProducts
+  getLowStockProducts,
+  exportProductsToExcel
 };

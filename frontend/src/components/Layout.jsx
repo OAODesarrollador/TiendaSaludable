@@ -1,155 +1,158 @@
-// src/layouts/Layout.jsx
-import React, { useState, useEffect } from 'react';
-import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from "react";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   ShoppingCart,
   Package,
-  DollarSign,
   FileText,
+  DollarSign,
   LogOut,
   User,
-  Menu,
-  X,
-} from 'lucide-react';
-import '../styles/Layout.css'; // <-- Asegurate esta ruta
-import logo from '../assets/Avenia.png'
+  Database,
+} from "lucide-react";
+import logo from "../assets/avenia.png";
+import "../styles/Layout.css";
 
 const Layout = () => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [user, setUser] = useState(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [importadorOpen, setImportadorOpen] = useState(false);
+  const location = useLocation();
+  const importadorRef = useRef(null);
 
+  // 🔹 Cierra el menú Importador si hacés clic fuera
   useEffect(() => {
-    const userData = localStorage.getItem('user');
-    if (userData) setUser(JSON.parse(userData));
+    const handleClickOutside = (event) => {
+      if (importadorRef.current && !importadorRef.current.contains(event.target)) {
+        setImportadorOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // 🔹 Mantiene el Importador desplegado al estar en cualquiera de sus subrutas
+  useEffect(() => {
+    if (location.pathname.startsWith("/importador")) {
+      setImportadorOpen(true);
+    } else {
+      setImportadorOpen(false);
+    }
+  }, [location.pathname]);
+
+  // 🔹 Corrige el Dashboard siempre activo
+  const isActive = (path) => {
+    if (path === "/") {
+      return location.pathname === "/";
+    }
+    return location.pathname.startsWith(path);
+  };
+
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    navigate('/login');
+    localStorage.removeItem("token");
+    window.location.href = "/login";
   };
 
   const menuItems = [
-    
-    { path: '/pos', icon: ShoppingCart, label: 'POS' },
-    { path: '/products', icon: Package, label: 'Productos' },
-    { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
-    { path: '/sales', icon: DollarSign, label: 'Ventas' },
-    { path: '/reports', icon: FileText, label: 'Reportes' },
-    { path: '/importador', icon: FileText, label: 'Importador' },
+    { path: "/", label: "Dashboard", icon: LayoutDashboard },
+    { path: "/pos", label: "POS", icon: ShoppingCart },
+    { path: "/products", label: "Productos", icon: Package },
+    { path: "/sales", label: "Ventas", icon: DollarSign },
+    { path: "/reports", label: "Reportes", icon: FileText },
   ];
-
-  // helper para marcar activo
-  const isActive = (path) =>
-    path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
 
   return (
     <div className="ln-root">
+      {/* HEADER */}
       <header className="ln-header">
         <div className="ln-header-inner">
+          {/* Logo y título */}
           <div className="ln-brand">
             <div className="ln-logo">
-              
-              <img src={logo} alt="logo" width="150" height="100" style={{marginLeft: '8px', borderRadius: '4px'}} />
-              
+              <img src={logo} alt="logo" style={{ width: "90%", height: "70px" }} />
             </div>
             
           </div>
 
-          {/* NAV desktop */}
+          {/* Navegación principal */}
           <nav className="ln-nav" aria-label="Principal">
-            {menuItems.map((it) => {
-              const Icon = it.icon;
+            {menuItems.map((item) => {
+              const Icon = item.icon;
               return (
                 <Link
-                  key={it.path}
-                  to={it.path}
-                  className={`ln-nav-link ${isActive(it.path) ? 'ln-active' : ''}`}
+                  key={item.path}
+                  to={item.path}
+                  className={`ln-nav-link ${isActive(item.path) ? "ln-active" : ""}`}
                   onClick={() => setMobileOpen(false)}
                 >
                   <Icon size={18} />
-                  <span>{it.label}</span>
+                  <span>{item.label}</span>
                 </Link>
               );
             })}
+
+            {/* 🔹 Dropdown Importador */}
+            <div className="ln-dropdown" ref={importadorRef}>
+              <button
+                className={`ln-nav-link ln-dropdown-toggle ${
+                  location.pathname.startsWith("/importador") ? "ln-active" : ""
+                }`}
+                onClick={() => setImportadorOpen(!importadorOpen)}
+              >
+                <Database size={18} />
+                <span>Importador</span>
+                <span className="ms-1">{importadorOpen ? "▲" : "▼"}</span>
+              </button>
+
+              {importadorOpen && (
+                <div className="ln-dropdown-menu show">
+                  <Link
+                    to="/importador/productos"
+                    className={`ln-dropdown-item ${
+                      location.pathname === "/importador/productos" ? "ln-active" : ""
+                    }`}
+                    onClick={() => setImportadorOpen(true)}
+                  >
+                    📦 Importar Productos
+                  </Link>
+                  <Link
+                    to="/importador/precios"
+                    className={`ln-dropdown-item ${
+                      location.pathname === "/importador/precios" ? "ln-active" : ""
+                    }`}
+                    onClick={() => setImportadorOpen(true)}
+                  >
+                    💲 Actualizar Precios
+                  </Link>
+                </div>
+              )}
+            </div>
           </nav>
 
-          {/* user + logout */}
+          {/* Usuario */}
           <div className="ln-actions">
             <div className="ln-user">
-              <div className="ln-avatar">
-                {user?.avatar ? (
-                  <img src={user.avatar} alt={user.full_name || 'Usuario'} />
-                ) : (
-                  <User size={16} />
-                )}
-              </div>
+              <div className="ln-avatar">👤</div>
               <div className="ln-user-info">
-                <div className="ln-user-name">{user?.full_name || 'Usuario'}</div>
-                <div className="ln-user-role">{user?.role || 'vendedor'}</div>
+                <div className="ln-user-name">Administrador</div>
+                <div className="ln-user-role">Admin</div>
               </div>
             </div>
-
-            <button className="ln-logout-btn" onClick={handleLogout} title="Cerrar sesión">
-              <LogOut size={16} />
-              <span>Salir</span>
-            </button>
-
-            <button
-              className="ln-mobile-toggle"
-              aria-label="Abrir menú"
-              onClick={() => setMobileOpen((s) => !s)}
-            >
-              {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+            <button className="ln-logout-btn" onClick={handleLogout}>
+              <LogOut size={16} /> Salir
             </button>
           </div>
-        </div>
 
-        {/* mobile menu */}
-        <div className={`ln-mobile-menu ${mobileOpen ? 'open' : ''}`}>
-          <nav className="ln-mobile-nav">
-            {menuItems.map((it) => {
-              const Icon = it.icon;
-              return (
-                <Link
-                  key={it.path}
-                  to={it.path}
-                  className={`ln-mobile-link ${isActive(it.path) ? 'ln-active' : ''}`}
-                  onClick={() => setMobileOpen(false)}
-                >
-                  <Icon size={18} />
-                  <span>{it.label}</span>
-                </Link>
-              );
-            })}
-          </nav>
-
-          <div className="ln-mobile-user">
-            <div className="ln-avatar-lg">
-              {user?.avatar ? <img src={user.avatar} alt={user.full_name || 'Usuario'} /> : <User size={20} />}
-            </div>
-            <div className="ln-mobile-user-info">
-              <div className="ln-user-name">{user?.full_name || 'Usuario'}</div>
-              <div className="ln-user-role">{user?.role || 'vendedor'}</div>
-            </div>
-
-            <button
-              className="ln-mobile-logout"
-              onClick={() => {
-                setMobileOpen(false);
-                handleLogout();
-              }}
-            >
-              <LogOut size={16} />
-              <span>Cerrar Sesión</span>
-            </button>
-          </div>
+          {/* Botón móvil */}
+          <button
+            className="ln-mobile-toggle"
+            onClick={() => setMobileOpen(!mobileOpen)}
+          >
+            ☰
+          </button>
         </div>
       </header>
 
+      {/* CONTENIDO PRINCIPAL */}
       <main className="ln-main">
         <div className="ln-container">
           <Outlet />
