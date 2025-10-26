@@ -131,4 +131,20 @@ export const importCsv = async (formData) => {
   return res.json();
 };
 
+export const updatePricesMatched = async (formData) => {
+  const res = await fetch(`${API_URL}/import/update-prices-matched`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Error en servidor: ${res.status} ${text || res.statusText}`);
+  }
+
+  return res.json();
+};
+
+
+
 export default api;

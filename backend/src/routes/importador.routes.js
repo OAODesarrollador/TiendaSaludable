@@ -24,4 +24,12 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 router.post('/', upload.single('file'), importController.importCsv);
+router.post(
+  "/update-prices-matched",
+  upload.single("file"),
+  importController.updatePricesMatched
+);
+router.post("/preview", upload.single("file"), importController.previewCsv);
+
+
 module.exports = router;

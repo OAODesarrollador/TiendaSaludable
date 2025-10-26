@@ -132,14 +132,20 @@ const POS = () => {
   const tax = subtotalAfterDiscount - subtotalNoTax;
 
 
-  // ===========================
-  const isExpiringSoon = (expirationDate) => {
+ const isExpiringSoon = (expirationDate) => {
   if (!expirationDate) return false;
+  const parts = expirationDate.split(/[- T:]/);
+  if (parts.length < 3) return false;
+
+  const [year, month, day] = parts;
+  const expireDate = new Date(year, month - 1, day);
   const today = new Date();
-  const expireDate = new Date(expirationDate);
   const diffDays = (expireDate - today) / (1000 * 60 * 60 * 24);
+
   return diffDays >= 0 && diffDays <= 7;
 };
+
+
 
   // ===========================
   // MODIFICADO: enviar price/discount al backend
@@ -537,6 +543,26 @@ const POS = () => {
     setDiscountValue(0);
   };
 
+  // --- Calcular mensaje de vencimiento ---
+const getExpirationMessage = (expirationDate) => {
+  if (!expirationDate) return null;
+
+  // Normalizar formato "YYYY-MM-DD HH:MM:SS"
+  const [year, month, day] = expirationDate.split(/[- T:]/);
+  const expireDate = new Date(year, month - 1, day);
+  const today = new Date();
+
+  // Diferencia en días redondeada
+  const diffDays = Math.floor((expireDate - today) / (1000 * 60 * 60 * 24));
+
+  if (diffDays < 0) return "❌ Producto vencido";
+  if (diffDays === 0) return "⚠️ Vence hoy";
+  if (diffDays === 1) return "⚠️ Vence mañana";
+  if (diffDays <= 7) return `⚠️ Vence en ${diffDays} días`;
+  return null;
+};
+
+
   return (
     <div className="space-y-6">
       <div>
@@ -577,14 +603,15 @@ const POS = () => {
                   p.sku.toLowerCase().includes(searchTerm.toLowerCase())
                 )
                 .map(product => (
-                  <div
+                <div
                     key={product.id}
                     className={`p-3 border rounded-lg transition-colors ${
                       isExpiringSoon(product.expiration_date)
-                        ? 'border-red-500 bg-red-100 hover:bg-red-200'
-                        : 'border-gray-200 hover:border-blue-500 hover:bg-blue-50'
+                        ? ' text-white border-red-700'
+                    : 'border-gray-200 hover:border-blue-500 hover:bg-blue-50 BLINK'
                     }`}
-                  >
+                >
+
                     <p className="font-medium text-sm text-gray-900 truncate">
                       {product.name}
                     </p>
@@ -594,11 +621,19 @@ const POS = () => {
                     </p>
                     <p className="text-xs text-gray-500 mb-2">Stock: {product.stock}</p>
 
-                    {isExpiringSoon(product.expiration_date) && (
-                      <p className="text-xs text-red-700 font-semibold mt-1 flex items-center gap-1">
-                        ⚠️ Vence pronto ({new Date(product.expiration_date).toLocaleDateString('es-AR')})
+                    {getExpirationMessage(product.expiration_date) && (
+                      <p
+                        className={`text-xs font-semibold mt-1 flex items-center gap-1 px-2 py-1 rounded blink ${
+                          getExpirationMessage(product.expiration_date).includes("❌")
+                            ? "bg-gray-800 text-red-400"
+                            : "bg-red-700 red-100 text-red-500"
+                        }`}
+                      >
+                        {getExpirationMessage(product.expiration_date)}
                       </p>
                     )}
+
+
 
                     <div className="flex gap-2 mt-2">
                       <button

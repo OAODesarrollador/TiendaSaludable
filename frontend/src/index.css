@@ -17,3 +17,12 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+@keyframes blinkSoft {
+  0% { background-color: #f7f4f4; }     /* rojo fuerte */
+  50% { background-color: #f7d6d6; }    /* rojo más claro */
+  100% { background-color:#f7f4f4; }    /* vuelve al rojo fuerte */
+}
+
+.blink {
+  animation: blinkSoft 1.8s infinite ease-in-out;
+}
