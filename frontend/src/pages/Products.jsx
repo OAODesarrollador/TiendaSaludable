@@ -164,6 +164,12 @@ const Products = () => {
     }
   };
 
+  const parseDecimal = (val) => {
+  if (val === null || val === undefined || val === '') return 0;
+  return parseFloat(String(val).replace(',', '.')) || 0;
+};
+
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -179,8 +185,10 @@ const Products = () => {
         ...formData,
         purchase_price: parseFloat(normalizePriceInput(formData.purchase_price || '0')),
         sale_price: parseFloat(normalizePriceInput(formData.sale_price || '0')),
-        stock: parseInt(formData.stock || 0, 10),
-        min_stock: parseInt(formData.min_stock || 0, 10)
+        // En handleSubmit → payload
+        stock: parseDecimal(formData.stock),
+        min_stock: parseDecimal(formData.min_stock),
+        
       };
 
       if (editingProduct) {

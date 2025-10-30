@@ -56,12 +56,23 @@ export const productsAPI = {
 };
 
 // ========== SALES ==========
+
 export const salesAPI = {
   create: (saleData) => api.post('/sales', saleData),
   getAll: (params) => api.get('/sales', { params }),
   getById: (id) => api.get(`/sales/${id}`),
-  getTicketPDF: (id) => api.get(`/sales/${id}/ticket`, { responseType: 'blob' })
+  getTicketPDF: (id) => api.get(`/sales/${id}/ticket`, { responseType: 'blob' }),
+
+  // ✅ NUEVO: crear nota de crédito (refund)
+  createRefund: (saleId, refundData) => api.post(`/sales/${saleId}/refunds`, refundData),
+
+  // ✅ NUEVO: obtener todas las notas de crédito de una venta
+  getRefundsBySale: (saleId) => api.get(`/sales/${saleId}/refunds`),
+
+  // ✅ NUEVO: obtener una nota de crédito específica
+  getRefundById: (refundId) => api.get(`/sales/refund/${refundId}`)
 };
+
 
 // ========== REPORTS ==========
 export const reportsAPI = {

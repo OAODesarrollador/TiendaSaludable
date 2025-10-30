@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { reportsAPI, productsAPI } from '../services/api';
 import { toast } from 'react-toastify';
 import { Download, FileText, Calendar } from 'lucide-react';
+import '../styles/Reports.css';
 import {
   BarChart,
   Bar,
@@ -39,46 +40,43 @@ const Reports = () => {
       console.error('Error cargando categorías:', error);
     }
   };
-// ...imports iguales
-const generateReport = async () => {
-  // Validación previa
-  if (filters.period === 'custom') {
-    if (!filters.start_date || !filters.end_date) {
-      toast.warning('Debe seleccionar una fecha de inicio y una de fin para el reporte personalizado.');
-      return;
-    }
-    if (filters.start_date > filters.end_date) {
-      toast.warning('La fecha de inicio no puede ser mayor a la fecha de fin.');
-      return;
-    }
-  }
 
-  setLoading(true);
-  try {
-    const params = {};
-    if (filters.period) params.period = filters.period;
-    if (filters.category) params.category = filters.category;
+  const generateReport = async () => {
     if (filters.period === 'custom') {
-      params.start_date = filters.start_date;
-      params.end_date = filters.end_date;
+      if (!filters.start_date || !filters.end_date) {
+        toast.warning('Debe seleccionar una fecha de inicio y una de fin para el reporte personalizado.');
+        return;
+      }
+      if (filters.start_date > filters.end_date) {
+        toast.warning('La fecha de inicio no puede ser mayor a la fecha de fin.');
+        return;
+      }
     }
 
-    const response =
-      filters.reportType === 'expiring'
-        ? await reportsAPI.getExpiringProducts(params)
-        : await reportsAPI.getSalesReport(params);
+    setLoading(true);
+    try {
+      const params = {};
+      if (filters.period) params.period = filters.period;
+      if (filters.category) params.category = filters.category;
+      if (filters.period === 'custom') {
+        params.start_date = filters.start_date;
+        params.end_date = filters.end_date;
+      }
 
-    setReportData(response.data);
-  } catch (error) {
-    console.error('Error generando reporte:', error);
-    const msg = error?.response?.data?.error || 'Error al generar reporte';
-    toast.error(msg);
-  } finally {
-    setLoading(false);
-  }
-};
+      const response =
+        filters.reportType === 'expiring'
+          ? await reportsAPI.getExpiringProducts(params)
+          : await reportsAPI.getSalesReport(params);
 
-
+      setReportData(response.data);
+    } catch (error) {
+      console.error('Error generando reporte:', error);
+      const msg = error?.response?.data?.error || 'Error al generar reporte';
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleExportCSV = async () => {
     try {
@@ -114,45 +112,40 @@ const generateReport = async () => {
     }
   };
 
-  const handleExportPDF = async () => {
-    try {
-      const params = {};
-      if (filters.period) params.period = filters.period;
-      if (filters.category) params.category = filters.category;
-      if (filters.period === 'custom' && filters.start_date && filters.end_date) {
-        params.start_date = filters.start_date;
-        params.end_date = filters.end_date;
-      }
-
-      let response;
-      if (filters.reportType === 'expiring') {
-        response = await reportsAPI.exportExpiringPDF(params);
-      } else {
-        response = await reportsAPI.exportPDF(params);
-      }
-
-      const blob = new Blob([response.data], { type: 'application/pdf' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download =
-        filters.reportType === 'expiring'
-          ? `reporte_vencimientos_${Date.now()}.pdf`
-          : `reporte_ventas_${Date.now()}.pdf`;
-      link.click();
-      window.URL.revokeObjectURL(url);
-      toast.success('Reporte PDF descargado');
-    } catch (error) {
-      console.error('Error exportando PDF:', error);
-      toast.error('Error al exportar PDF');
+const handleExportPDF = async () => {
+  try {
+    const params = new URLSearchParams();
+    if (filters.period) params.append('period', filters.period);
+    if (filters.category) params.append('category', filters.category);
+    if (filters.period === 'custom' && filters.start_date && filters.end_date) {
+      params.append('start_date', filters.start_date);
+      params.append('end_date', filters.end_date);
     }
-  };
+
+    // ✅ Hace la petición autenticada al backend
+    const response =
+      filters.reportType === 'expiring'
+        ? await reportsAPI.exportExpiringPDF(params, { responseType: 'blob' })
+        : await reportsAPI.exportPDF(params, { responseType: 'blob' });
+
+    // ✅ Crea una URL temporal para abrir el PDF inline
+    const blob = new Blob([response.data], { type: 'application/pdf' });
+    const url = window.URL.createObjectURL(blob);
+
+    // ✅ Abre una nueva pestaña con la vista previa
+    const pdfWindow = window.open(url, '_blank', 'noopener,noreferrer');
+    
+  } catch (error) {
+    console.error('Error al abrir previsualización:', error);
+    toast.error('No se pudo abrir el PDF');
+  }
+};
+
 
   const handleFilterChange = (e) => {
     setFilters({ ...filters, [e.target.name]: e.target.value });
   };
 
-  // Datos para los gráficos
   const chartDataByCategory =
     reportData && filters.reportType === 'sales'
       ? Object.entries(reportData.stats.by_category).map(([category, data]) => ({
@@ -174,16 +167,36 @@ const generateReport = async () => {
           }))
       : [];
 
-  // Preprocesar datos de vencimientos con keys seguras
   const expiringData =
     reportData?.data?.map((p, idx) => ({
       ...p,
       uuid: p.id || `${p.sku || 'prod'}-${idx}`
     })) || [];
+  
+    // --- Helpers para normalizar números y calcular importe bruto ---
+  // --- Helpers numéricos (evita NaN por strings/con coma) ---
+  // --- Helpers numéricos (evita NaN por strings/con coma) ---
+  const toNumber = (v) => {
+    if (v === null || v === undefined) return 0;
+    const s = String(v).trim().replace(',', '.');
+    const n = Number(s);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  // Importe BRUTO por renglón = cantidad * precio unitario (con signo)
+  const grossAmount = (row) => toNumber(row.quantity) * toNumber(row.unit_price);
+
+  // Suma genérica segura
+  const sum = (rows, pick) =>
+    (rows || []).reduce((acc, r) => acc + toNumber(pick(r)), 0);
+
+
+
+  
+  
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-gray-900">
           {filters.reportType === 'expiring'
@@ -200,11 +213,8 @@ const generateReport = async () => {
       {/* Filtros */}
       <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-          {/* Tipo de reporte */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Tipo de Reporte
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Tipo de Reporte</label>
             <select
               name="reportType"
               value={filters.reportType}
@@ -216,11 +226,8 @@ const generateReport = async () => {
             </select>
           </div>
 
-          {/* Período */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Período
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Período</label>
             <select
               name="period"
               value={filters.period}
@@ -247,13 +254,10 @@ const generateReport = async () => {
             </select>
           </div>
 
-          {/* Fechas personalizadas */}
           {filters.period === 'custom' && (
             <>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Fecha Inicio
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Fecha Inicio</label>
                 <input
                   type="date"
                   name="start_date"
@@ -263,9 +267,7 @@ const generateReport = async () => {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Fecha Fin
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Fecha Fin</label>
                 <input
                   type="date"
                   name="end_date"
@@ -277,12 +279,9 @@ const generateReport = async () => {
             </>
           )}
 
-          {/* Categoría */}
           {filters.reportType === 'sales' && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Categoría
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Categoría</label>
               <select
                 name="category"
                 value={filters.category}
@@ -299,7 +298,6 @@ const generateReport = async () => {
             </div>
           )}
 
-          {/* Botón generar */}
           <div className="flex items-end gap-2">
             <button
               onClick={generateReport}
@@ -312,7 +310,6 @@ const generateReport = async () => {
         </div>
       </div>
 
-      {/* Botones de exportación */}
       {reportData && (
         <div className="flex gap-4">
           <button
@@ -332,7 +329,119 @@ const generateReport = async () => {
         </div>
       )}
 
-      {/* Contenido condicional */}
+      {/* === Libro Mayor (Ventas + Notas de Crédito) === */}
+      {filters.reportType === 'sales' && reportData?.data?.length > 0 && (
+        <div className="card mt-6 shadow-sm border border-gray-200">
+          <div className="card-header bg-dark text-white p-3 rounded-t-lg">
+            <h5 className="mb-0">📘 Libro Mayor (Ventas + Notas de Crédito)</h5>
+          </div>
+          <div className="card-body p-4 overflow-auto ">
+            <table className="table table-striped table-hover table-bordered text-center w-100">
+              <thead className="table-dark sticky-top">
+                <tr>
+                  <th>Fecha</th>
+                  <th>Tipo</th>
+                  <th>ID Venta</th>
+                  <th>Producto</th>
+                  <th>Cantidad</th>
+                  <th>Precio Unitario</th>
+                  <th>Importe</th>
+                  {/* 👇 NUEVA COLUMNA */}
+                  <th>Descuento</th>
+                  <th>Debe</th>
+                  <th>Haber</th>
+                  <th>Método Pago</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {reportData.data.map((row) => (
+                  <tr key={`${row.entry_type}-${row.doc_id}-${row.product_id}`}
+                      className={row.entry_type === 'REFUND' ? 'table-danger' : 'table-success'}>
+                    <td>{new Date(row.created_at).toLocaleDateString('es-AR')}</td>
+                    <td>{row.entry_type === 'REFUND' ? 'NOTA DE CRÉDITO' : 'VENTA'}</td>
+                    <td>{row.sale_id}</td>
+                    <td>{row.product_name}</td>
+                    <td>{row.quantity}</td>
+                    <td>${Number(row.unit_price).toFixed(2)}</td>
+                    
+                    {/* IMPORTE BRUTO = cantidad * precio (parseado a número real) */}
+                    <td className={grossAmount(row) < 0 ? 'text-danger' : ''}>
+                      ${grossAmount(row).toFixed(2)}
+                    </td>
+
+
+                    {/* 👇 DESCUENTO POR RENGLÓN */}
+                    <td className={Number(row.item_discount_amount) !== 0 ? 'text-warning fw-semibold' : ''}>
+                      ${Math.abs(Number(row.item_discount_amount || 0)).toFixed(2)}
+                    </td>
+
+                    <td className="text-danger">
+                      {row.debit ? `$${Number(row.debit).toFixed(2)}` : '-'}
+                    </td>
+                    <td className="text-success">
+                      {row.credit ? `$${Number(row.credit).toFixed(2)}` : '-'}
+                    </td>
+                    <td>{row.payment_method}</td>
+                  </tr>
+                ))}
+              </tbody>
+
+            </table>
+          {/* === Pie de totales calculados en frontend (suma de columnas) === */}
+          <div className="mt-3 text-end">
+            {(() => {
+              // Debe = r.debit (ya viene positivo para NC)
+              const totalDebe = sum(reportData.data, r => r.debit);
+
+              // Haber = r.credit (ya viene positivo para ventas)
+              const totalHaber = sum(reportData.data, r => r.credit);
+
+              // Descuento = suma absoluta de los descuentos por renglón
+              const totalDescuento = sum(reportData.data, r => Math.abs(r.item_discount_amount || 0));
+
+              // Total final solicitado: Haber - Debe - Descuento
+              const totalFinal = totalHaber - totalDebe - totalDescuento;
+
+              return (
+                <>
+                  
+
+                  <p className="fw-bold mb-0">
+                    Total Haber (Ventas):{' '}
+                    <span className="text-success">
+                      ${totalHaber.toFixed(2)}
+                    </span>
+                  </p>
+                  <p className="fw-bold mb-0">
+                    Total Debe (NC):{' '}
+                    <span className="text-danger">
+                      ${totalDebe.toFixed(2)}
+                    </span>
+                  </p>
+                  <p className="fw-bold mb-0">
+                    Total Descuentos (líneas):{' '}
+                    <span className="text-warning">
+                      ${totalDescuento.toFixed(2)}
+                    </span>
+                  </p>
+
+                  <p className="fw-bold mt-2">
+                    Total = {' '}
+                    <span className={totalFinal >= 0 ? 'text-primary' : 'text-danger'}>
+                      ${totalFinal.toFixed(2)}
+                    </span>
+                  </p>
+                </>
+              );
+            })()}
+          </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* === Reporte de Vencimientos === */}
       {filters.reportType === 'expiring' && reportData && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="p-6 border-b border-gray-200">
@@ -344,11 +453,21 @@ const generateReport = async () => {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50 sticky top-0">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">SKU</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nombre</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Categoría</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stock</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Vencimiento</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    SKU
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    Nombre
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    Categoría
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    Stock
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    Vencimiento
+                  </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
@@ -357,7 +476,9 @@ const generateReport = async () => {
                     <td className="px-6 py-4 text-sm text-gray-900">{p.sku}</td>
                     <td className="px-6 py-4 text-sm text-gray-900">{p.name}</td>
                     <td className="px-6 py-4 text-sm text-gray-900">{p.category}</td>
-                    <td className="px-6 py-4 text-sm text-gray-900 text-center">{p.stock}</td>
+                    <td className="px-6 py-4 text-sm text-gray-900 text-center">
+                      {p.stock}
+                    </td>
                     <td className="px-6 py-4 text-sm font-semibold text-red-600">
                       {new Date(p.expiration_date).toLocaleDateString('es-AR')}
                     </td>

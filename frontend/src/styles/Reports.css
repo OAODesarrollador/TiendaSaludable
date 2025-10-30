@@ -1,0 +1,19 @@
+.table-dark.sticky-top th {
+  background-color: #1e293b !important; /* Cambiá este color a gusto */
+  color: #fcfafa !important;               /* Color del texto */
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  height: 45px;                         /* Altura del encabezado */
+  vertical-align: middle;               /* Centrar el texto verticalmente */
+}
+.table-hover td {
+  white-space: nowrap;       /* 🔒 Evita el salto de línea */
+  overflow: hidden;          /* Oculta texto que excede */
+  text-overflow: ellipsis;   /* Muestra "..." si se corta */
+  vertical-align: middle;    /* Centra verticalmente */
+  padding: 6px 8px;          /* Achica un poco la altura */
+}
+.table-hover tbody tr:hover {
+  background-color: #f1f5f9; /* Color de fondo al pasar el mouse */
+}

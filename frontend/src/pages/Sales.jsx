@@ -493,40 +493,88 @@ const Sales = () => {
           <th className="px-6 py-3 text-left text-xs font-medium text-black uppercase tracking-wider">Acciones</th>
         </tr>
       </thead>
-      <tbody className="bg-white divide-y divide-gray-200">
-        {sales.map((sale) => (
-          <tr key={sale.id} className="hover:bg-green-200 transition ">
-            <td className="px-6 py-1 whitespace-nowrap text-sm font-medium text-gray-900">#{sale.id}</td>
-            <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900">{new Date(sale.created_at).toLocaleString('es-AR')}</td>
-            <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900">{sale.seller_name}</td>
-            <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900 text-center">{sale.items?.length || 0}</td>
-            <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900">${sale.subtotal.toFixed(2)}</td>
-            <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900">${sale.tax.toFixed(2)}</td>
-            <td className="px-6 py-1 whitespace-nowrap text-sm font-semibold text-green-600">${sale.total.toFixed(2)}</td>
-            <td className="px-6 py-1 whitespace-nowrap">
-              <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-700 rounded-full capitalize">{sale.payment_method}</span>
-            </td>
-            <td className="px-6 py-1 whitespace-nowrap text-sm">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleViewDetails(sale.id)}
-                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                  title="Ver detalle"
-                >
-                  <Eye size={18} />
-                </button>
-                <button
-                  onClick={() => handleDownloadPDF(sale.id)}
-                  className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition"
-                  title="Descargar ticket"
-                >
-                  <Download size={18} />
-                </button>
-              </div>
-            </td>
-          </tr>
-        ))}
-      </tbody>
+<tbody className="bg-white divide-y divide-gray-200">
+  {sales.map((sale) => (
+    <tr
+      key={sale.id}
+      className={`transition ${
+        sale.type === 'Nota de Crédito'
+          ? 'bg-red-50 hover:bg-red-100'
+          : 'hover:bg-green-100'
+      }`}
+    >
+      <td className="px-6 py-1 whitespace-nowrap text-sm font-medium text-gray-900">
+        #{sale.id}
+      </td>
+      <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900">
+        {new Date(sale.created_at).toLocaleString('es-AR')}
+      </td>
+      <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900">
+        {sale.seller_name}
+      </td>
+      <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900 text-center">
+        {sale.type === 'Nota de Crédito' ? '-' : sale.items?.length || 0}
+      </td>
+      <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900">
+        ${Number(sale.subtotal || 0).toFixed(2)}
+      </td>
+      <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900">
+        ${Number(sale.tax || 0).toFixed(2)}
+      </td>
+      <td
+        className={`px-6 py-1 whitespace-nowrap text-sm font-semibold ${
+          sale.type === 'Nota de Crédito' ? 'text-red-600' : 'text-green-600'
+        }`}
+      >
+        ${Number(sale.total || 0).toFixed(2)}
+      </td>
+      <td className="px-6 py-1 whitespace-nowrap">
+        <span
+          className={`px-2 py-1 text-xs font-medium rounded-full ${
+            sale.type === 'Nota de Crédito'
+              ? 'bg-red-100 text-red-700'
+              : 'bg-blue-100 text-blue-700'
+          }`}
+        >
+          {sale.type}
+        </span>
+      </td>
+      <td className="px-6 py-1 whitespace-nowrap text-sm">
+        <div className="flex items-center gap-2">
+          {sale.type === 'Venta' && (
+            <>
+              <button
+                onClick={() => handleViewDetails(sale.id)}
+                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
+                title="Ver detalle"
+              >
+                <Eye size={18} />
+              </button>
+              <button
+                onClick={() => handleDownloadPDF(sale.id)}
+                className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition"
+                title="Descargar ticket"
+              >
+                <Download size={18} />
+              </button>
+            </>
+          )}
+        </div>
+      </td>
+    </tr>
+  ))}
+
+  {sales.length === 0 && (
+    <tr>
+      <td colSpan="9" className="text-center py-12 text-gray-500">
+        No se encontraron registros
+      </td>
+    </tr>
+  )}
+</tbody>
+
+
+
     </table>
 
     {sales.length === 0 && (

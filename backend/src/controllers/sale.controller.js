@@ -1,5 +1,5 @@
 // ============================================
-// SALE CONTROLLER (versión final con migración automática y funciones de devolución)
+// SALE CONTROLLER (versión final con refunds anidados)
 // ============================================
 const { db, runAsync, getAsync, allAsync } = require('../config/database');
 const PDFDocument = require('pdfkit');
@@ -29,7 +29,7 @@ const ensureSaleItemsColumns = async () => {
 ensureSaleItemsColumns();
 
 // ============================================
-// CREAR NUEVA VENTA (usa precio y descuento del POS)
+// CREAR NUEVA VENTA
 // ============================================
 const createSale = async (req, res) => {
   try {
@@ -138,48 +138,79 @@ const createSale = async (req, res) => {
     res.status(500).json({ error: 'Error al procesar la venta' });
   }
 };
-
 // ============================================
-// OBTENER TODAS LAS VENTAS
+// OBTENER TODAS LAS VENTAS Y NOTAS DE CRÉDITO (UNIFICADAS EN UNA SOLA LISTA)
 // ============================================
 const getAllSales = async (req, res) => {
   try {
-    const { start_date, end_date, limit = 50, offset = 0 } = req.query;
+    const { start_date, end_date, limit = 100, offset = 0 } = req.query;
 
-    let sql = `
-      SELECT s.*, u.full_name as seller_name 
-      FROM sales s 
-      LEFT JOIN users u ON s.user_id = u.id 
-      WHERE 1=1
-    `;
-    const params = [];
+    // 🔹 Traer todas las ventas
+    const sales = await allAsync(
+      `
+      SELECT 
+        s.id,
+        s.created_at,
+        u.full_name AS seller_name,
+        s.subtotal,
+        s.tax,
+        s.total,
+        s.payment_method,
+        'Venta' AS type
+      FROM sales s
+      LEFT JOIN users u ON s.user_id = u.id
+      WHERE DATE(s.created_at) BETWEEN DATE(?) AND DATE(?)
+      ORDER BY s.created_at DESC
+      LIMIT ? OFFSET ?
+      `,
+      [start_date || '1900-01-01', end_date || '2100-12-31', parseInt(limit), parseInt(offset)]
+    );
 
-    if (start_date) {
-      sql += ' AND DATE(s.created_at) >= DATE(?)';
-      params.push(start_date);
+    // 🔹 Traer todas las notas de crédito
+    const refunds = await allAsync(
+      `
+      SELECT 
+        r.id,
+        r.created_at,
+        u.full_name AS seller_name,
+        (r.subtotal * -1) AS subtotal,
+        (r.tax * -1) AS tax,
+        (r.total * -1) AS total,
+        'Nota de Crédito' AS payment_method,
+        'Nota de Crédito' AS type
+      FROM refunds r
+      LEFT JOIN sales s ON r.sale_id = s.id
+      LEFT JOIN users u ON s.user_id = u.id
+      WHERE DATE(r.created_at) BETWEEN DATE(?) AND DATE(?)
+      ORDER BY r.created_at DESC
+      `,
+      [start_date || '1900-01-01', end_date || '2100-12-31']
+    );
+
+    // 🔹 Unir ventas + notas de crédito
+    const combined = [...sales, ...refunds].sort(
+      (a, b) => new Date(b.created_at) - new Date(a.created_at)
+    );
+
+    // 🔹 Agregar items a cada registro (opcional)
+    for (const record of combined) {
+      if (record.type === 'Venta') {
+        record.items = await allAsync('SELECT * FROM sale_items WHERE sale_id = ?', [record.id]);
+      } else if (record.type === 'Nota de Crédito') {
+        record.items = await allAsync(
+          `SELECT * FROM refund_items WHERE refund_id = ? ORDER BY id ASC`,
+          [record.id]
+        );
+      }
     }
 
-    if (end_date) {
-      sql += ' AND DATE(s.created_at) <= DATE(?)';
-      params.push(end_date);
-    }
-
-    sql += ' ORDER BY s.created_at DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), parseInt(offset));
-
-    const sales = await allAsync(sql, params);
-
-    for (const sale of sales) {
-      sale.items = await allAsync('SELECT * FROM sale_items WHERE sale_id = ?', [sale.id]);
-      sale.refunds = await allAsync('SELECT * FROM refunds WHERE sale_id = ?', [sale.id]);
-    }
-
-    res.json(sales);
+    res.json(combined);
   } catch (error) {
-    console.error('Error obteniendo ventas:', error);
-    res.status(500).json({ error: 'Error al obtener ventas' });
+    console.error('Error obteniendo ventas y notas de crédito unificadas:', error);
+    res.status(500).json({ error: 'Error al obtener ventas y notas de crédito' });
   }
 };
+
 
 // ============================================
 // OBTENER VENTA POR ID
@@ -197,7 +228,18 @@ const getSaleById = async (req, res) => {
     if (!sale) return res.status(404).json({ error: 'Venta no encontrada' });
 
     sale.items = await allAsync('SELECT * FROM sale_items WHERE sale_id = ?', [id]);
-    sale.refunds = await allAsync('SELECT * FROM refunds WHERE sale_id = ?', [id]);
+
+    const refunds = await allAsync(
+      `SELECT * FROM refunds WHERE sale_id = ? ORDER BY created_at DESC`,
+      [id]
+    );
+    for (const r of refunds) {
+      r.items = await allAsync(
+        `SELECT * FROM refund_items WHERE refund_id = ? ORDER BY id ASC`,
+        [r.id]
+      );
+    }
+    sale.refunds = refunds;
 
     res.json(sale);
   } catch (error) {
@@ -235,6 +277,9 @@ const createRefund = async (req, res) => {
           await runAsync('ROLLBACK');
           return res.status(400).json({ error: `El producto ID ${item.product_id} no pertenece a esta venta` });
         }
+
+        // (Opcional: validar restante si ya hay devoluciones previas)
+        // Aquí podrías sumar devoluciones previas y limitar el max "remaining"
 
         if (item.quantity > saleItem.quantity) {
           await runAsync('ROLLBACK');

@@ -23,6 +23,8 @@ const POS = () => {
   const [discountType, setDiscountType] = useState('percentage');
   const [discountValue, setDiscountValue] = useState(0);
   const [editingProductId, setEditingProductId] = useState(null);
+  const [paymentMethod, setPaymentMethod] = useState('efectivo');
+
 
   const barcodeInputRef = useRef(null);
   const ticketRef = useRef(null);
@@ -164,7 +166,8 @@ const POS = () => {
         })),
         // Descuento global opcional (si lo usás):
         order_discount: totalDiscount || 0,     // ✅ descuento total aplicado en el carrito
-        payment_method: 'efectivo'
+        payment_method: paymentMethod
+
       };
       
       const response = await salesAPI.create(saleData);
@@ -770,7 +773,33 @@ const getExpirationMessage = (expirationDate) => {
               <Calculator size={16} /> Aplicar Descuento Total
             </button>
           </div>
-
+          
+          <div className="mt-3">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Forma de Pago:</label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPaymentMethod('efectivo')}
+                  className={`flex-1 py-2 rounded-lg border font-medium ${
+                    paymentMethod === 'efectivo'
+                      ? 'bg-green-600 text-white border-green-600'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  💵 Efectivo
+                </button>
+                <button
+                  onClick={() => setPaymentMethod('tarjeta')}
+                  className={`flex-1 py-2 rounded-lg border font-medium ${
+                    paymentMethod === 'tarjeta'
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  💳 Tarjeta
+                </button>
+              </div>
+          </div>
+  
           <div className="flex gap-2 mt-2">  
             <button
               onClick={handleCheckout}
