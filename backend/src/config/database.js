@@ -2,6 +2,7 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 
+// 📦 Ruta de la base de datos
 const dbPath = process.env.DB_PATH || './database/tienda.db';
 const dbDir = path.dirname(dbPath);
 
@@ -10,19 +11,21 @@ if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
-// Crear conexión a la base de datos
+// Conexión a SQLite
 const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
     console.error('❌ Error al conectar con la base de datos:', err);
   } else {
-    console.log('✅ Conectado a SQLite');
+    console.log(`✅ Conectado a SQLite → ${dbPath}`);
   }
 });
 
-// Habilitar claves foráneas
+// Activar claves foráneas (solo para las relaciones válidas)
 db.run('PRAGMA foreign_keys = ON');
 
-// Inicializar tablas
+// =========================
+//  Inicialización de tablas
+// =========================
 const initialize = () => {
   db.serialize(() => {
     // Tabla de usuarios
@@ -49,8 +52,8 @@ const initialize = () => {
         description TEXT,
         purchase_price REAL NOT NULL,
         sale_price REAL NOT NULL,
-        stock INTEGER DEFAULT 0,
-        min_stock INTEGER DEFAULT 10,
+        stock REAL DEFAULT 0,              -- ✅ ahora permite decimales
+        min_stock REAL DEFAULT 10,         -- ✅ permite decimales
         supplier TEXT,
         active INTEGER DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -72,14 +75,14 @@ const initialize = () => {
       )
     `);
 
-    // Tabla de detalle de ventas
+    // Detalle de ventas
     db.run(`
       CREATE TABLE IF NOT EXISTS sale_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         sale_id INTEGER NOT NULL,
         product_id INTEGER NOT NULL,
         product_name TEXT NOT NULL,
-        quantity INTEGER NOT NULL,
+        quantity REAL NOT NULL,
         unit_price REAL NOT NULL,
         subtotal REAL NOT NULL,
         FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
@@ -87,19 +90,48 @@ const initialize = () => {
       )
     `);
 
-    // Índices para mejorar rendimiento
+    // ✅ Nueva tabla de coeficientes por categoría (sin foreign key)
+    db.run(`
+      CREATE TABLE IF NOT EXISTS category_coefficients (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT UNIQUE NOT NULL,
+        coefficient REAL DEFAULT 1.0
+      )
+    `);
+
+    // Índices para optimizar consultas
     db.run('CREATE INDEX IF NOT EXISTS idx_products_ean13 ON products(ean13)');
     db.run('CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(created_at)');
     db.run('CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)');
+    db.run('CREATE INDEX IF NOT EXISTS idx_coeff_category ON category_coefficients(category)');
 
     console.log('✅ Tablas inicializadas correctamente');
+
+    // 🔧 Inicialización automática de coeficientes
+    db.all('SELECT DISTINCT category FROM products', [], (err, rows) => {
+      if (err) {
+        console.error('⚠️ Error inicializando coeficientes:', err.message);
+      } else if (rows.length > 0) {
+        rows.forEach((r) => {
+          db.run(
+            'INSERT OR IGNORE INTO category_coefficients (category, coefficient) VALUES (?, ?)',
+            [r.category, 1.0]
+          );
+        });
+        console.log(`⚙️ Coeficientes inicializados para ${rows.length} categorías existentes.`);
+      } else {
+        console.log('ℹ️ No se encontraron categorías para inicializar coeficientes.');
+      }
+    });
   });
 };
 
-// Función helper para promesas
+// =========================
+//  Helpers Promesas Async
+// =========================
 const runAsync = (sql, params = []) => {
   return new Promise((resolve, reject) => {
-    db.run(sql, params, function(err) {
+    db.run(sql, params, function (err) {
       if (err) reject(err);
       else resolve({ id: this.lastID, changes: this.changes });
     });
@@ -124,6 +156,7 @@ const allAsync = (sql, params = []) => {
   });
 };
 
+// Exportar conexión y utilidades
 module.exports = {
   db,
   initialize,

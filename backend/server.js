@@ -39,7 +39,7 @@ app.use('/api/sales', saleRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/import', importadorRoutes);
-
+app.use('/api/coeficientes', require('./src/routes/coeficiente.routes'));
 
 // Ruta de prueba
 app.get('/api/health', (req, res) => {
@@ -62,6 +62,10 @@ app.use((err, req, res, next) => {
     error: err.message || 'Error interno del servidor'
   });
 });
+// Rutas de coeficientes
+
+
+
 
 // Iniciar servidor
 app.listen(PORT, () => {

@@ -123,6 +123,15 @@ const Layout = () => {
                   >
                     💲 Actualizar Precios
                   </Link>
+                  <Link
+                      to="/importador/coeficiente"
+                      className={`ln-dropdown-item ${
+                        location.pathname === "/importador/coeficiente" ? "ln-active" : ""
+                      }`}
+                      onClick={() => setImportadorOpen(true)}
+                    >
+                      ⚙️ Act. con Coeficiente
+                  </Link>
                 </div>
               )}
             </div>

@@ -17,6 +17,8 @@ import Layout from './components/Layout';
 import Importador from './components/Importador';
 import ImportarProductos from './components/ImportarProductos';
 import ActualizarPrecios from './components/actualizarPrecios';
+import ActualizarCoeficiente from './components/ActualizarCoeficiente';
+
 
 
 // Componente de ruta protegida
@@ -57,6 +59,8 @@ function App() {
             <Route path="importador" element={<Importador />} />
             <Route path="importador/productos" element={<ImportarProductos />} />
             <Route path="importador/precios" element={<ActualizarPrecios />} />
+            <Route path="importador/coeficiente" element={<ActualizarCoeficiente />} />
+
           </Route>
       </Routes>
     </BrowserRouter>

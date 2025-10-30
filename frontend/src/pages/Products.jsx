@@ -4,7 +4,7 @@ import { productsAPI } from '../services/api';
 import { toast } from 'react-toastify';
 import { Plus, Edit2, Trash2, Printer, Camera } from 'lucide-react';
 import Barcode from 'react-barcode';
-
+import api from '../services/api';
 import ProductModal from '../components/ProductModal';
 import BarcodeScanner from '../components/BarcodeScanner';
 import '../styles/Layout.css'
@@ -143,17 +143,39 @@ const Products = () => {
     return number.toFixed(2);
   };
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    
-    // Para campos de precio, normalizar la entrada
-    if (name === 'purchase_price' || name === 'sale_price') {
-      const normalized = normalizePriceInput(value);
-      setFormData(prev => ({ ...prev, [name]: normalized }));
-    } else {
-      setFormData(prev => ({ ...prev, [name]: value }));
+  // 🔹 Maneja los cambios en el formulario y actualiza el precio de venta automáticamente
+const handleChange = async (e) => {
+  const { name, value } = e.target;
+  const normalized = name === 'purchase_price' ? normalizePriceInput(value) : value;
+
+  setFormData(prev => ({ ...prev, [name]: normalized }));
+
+  // Si cambian la categoría o el precio de compra → recalcular precio de venta
+  if ((name === 'purchase_price' && formData.category) || (name === 'category' && formData.purchase_price)) {
+    try {
+      const res = await api.get("/coeficientes");
+      const json = res.data;
+
+      const data = Array.isArray(json) ? json : json.data || json.coefficients || [];
+
+      const selectedCategory = name === 'category' ? value : formData.category;
+      const coefRow = data.find(c => c.category === selectedCategory);
+
+      const coef = coefRow ? parseFloat(coefRow.coefficient) : 1.0;
+
+      const purchase = parseFloat(name === 'purchase_price' ? normalized : formData.purchase_price || 0);
+      const sale = Math.ceil((purchase * coef) / 50) * 50;
+
+      setFormData(prev => ({
+        ...prev,
+        sale_price: sale.toFixed(2)
+      }));
+    } catch (error) {
+      console.error('Error al obtener coeficientes:', error);
     }
-  };
+  }
+};
+
 
   // Manejar el blur para formatear precios automáticamente
   const handlePriceBlur = (e) => {
