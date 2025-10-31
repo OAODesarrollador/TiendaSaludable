@@ -75,20 +75,38 @@ export const salesAPI = {
 
 
 // ========== REPORTS ==========
+// ========== REPORTS ==========
 export const reportsAPI = {
+  // === Ventas ===
   getSalesReport: (params) => api.get('/reports/sales', { params }),
   exportCSV: (params) =>
     api.get('/reports/export/csv', { params, responseType: 'blob' }),
   exportPDF: (params) =>
     api.get('/reports/export/pdf', { params, responseType: 'blob' }),
 
-  // 👇 nuevos endpoints para vencimientos
+  // === Vencimientos ===
   getExpiringProducts: (params) =>
     api.get('/reports/expiring', { params }),
   exportExpiringCSV: (params) =>
     api.get('/reports/export/expiring-csv', { params, responseType: 'blob' }),
   exportExpiringPDF: (params) =>
-    api.get('/reports/export/expiring-pdf', { params, responseType: 'blob' })
+    api.get('/reports/export/expiring-pdf', { params, responseType: 'blob' }),
+
+  // === 🆕 Descuentos ===
+  getDiscountSales: (params) =>
+    api.get('/reports/discounts', { params }),
+
+  exportDiscountCSV: (params) =>
+    api.get('/reports/discounts/export/csv', {
+      params,
+      responseType: 'blob'
+    }),
+
+  exportDiscountPDF: (params) =>
+    api.get('/reports/discounts/export/pdf', {
+      params,
+      responseType: 'blob'
+    })
 };
 
 // ========== DASHBOARD ==========

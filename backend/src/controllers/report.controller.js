@@ -1,10 +1,12 @@
 // ============================================
 // REPORT CONTROLLER (report.controller.js)
 // ============================================
+const axios = require('axios');
 
 const { Parser } = require('json2csv');
 const PDFDocument = require('pdfkit');
 const { allAsync } = require('../config/database'); // mantiene tu helper existente
+//const { exportToCSV, exportToPDF } = require("../utils/exportHelpers"); 
 
 // ========================= Helpers de fecha =========================
 const normalizePeriod = (p) => (p ?? '').toString().trim().toLowerCase();
@@ -638,16 +640,481 @@ const exportExpiringPDF = async (req, res) => {
     return res.status(code).json({ error: error.message || 'Error al exportar PDF de vencimientos' });
   }
 };
+// === Reporte de Ventas con Descuentos ===
+// ============================================
+// 💸 Reporte de ventas con descuentos
+// ============================================
+// ============================================
+// 💸 Reporte de ventas con descuentos (correcto)
+// ============================================
+const getDiscountSales = async (req, res) => {
+  try {
+    const { start_date, end_date, period } = req.query;
+
+    // ---- filtro de fechas (mismas reglas que usás en ventas) ----
+    const now = new Date();
+    let dateFilter = '';
+    const params = [];
+
+    if (period && period !== 'custom') {
+      const start = new Date();
+      if (period === 'today') {
+        dateFilter = 'AND DATE(s.created_at) = DATE(?)';
+        params.push(new Date().toISOString().slice(0, 10));
+      } else if (period === 'week') {
+        start.setDate(now.getDate() - 7);
+        dateFilter = 'AND s.created_at BETWEEN ? AND ?';
+        params.push(start.toISOString(), now.toISOString());
+      } else if (period === 'month') {
+        start.setMonth(now.getMonth() - 1);
+        dateFilter = 'AND s.created_at BETWEEN ? AND ?';
+        params.push(start.toISOString(), now.toISOString());
+      } else if (period === 'year') {
+        start.setFullYear(now.getFullYear() - 1);
+        dateFilter = 'AND s.created_at BETWEEN ? AND ?';
+        params.push(start.toISOString(), now.toISOString());
+      }
+    } else if (start_date && end_date) {
+      dateFilter = 'AND DATE(s.created_at) BETWEEN DATE(?) AND DATE(?)';
+      params.push(start_date, end_date);
+    }
+
+    // ---- filas: solo tickets con algún descuento (EXISTS en sale_items) ----
+    const rowsSql = `
+      SELECT
+        s.id,
+        s.created_at,
+        u.full_name AS seller_name,
+        s.payment_method,
+        s.subtotal,              -- subtotal (neto sin IVA, según tu createSale)
+        s.tax,
+        s.total,                 -- total con IVA
+
+        /* Itens con descuento */
+        (
+          SELECT COUNT(*)
+          FROM sale_items si
+          WHERE si.sale_id = s.id AND COALESCE(si.discount, 0) > 0
+        ) AS discounted_items_count,
+
+        /* Monto total descontado = Σ( bruto - neto ) por ítem */
+        (
+          SELECT COALESCE(SUM((si.quantity * si.unit_price) - si.subtotal), 0)
+          FROM sale_items si
+          WHERE si.sale_id = s.id
+        ) AS discount_total_amount,
+
+        /* Bruto antes de descuentos: Σ(q * unit_price) */
+        (
+          SELECT COALESCE(SUM(si.quantity * si.unit_price), 0)
+          FROM sale_items si
+          WHERE si.sale_id = s.id
+        ) AS gross_amount,
+
+        /* Neto ítems: Σ(subtotal ítem) (igual a doc_total sin IVA) */
+        (
+          SELECT COALESCE(SUM(si.subtotal), 0)
+          FROM sale_items si
+          WHERE si.sale_id = s.id
+        ) AS items_subtotal
+      FROM sales s
+      LEFT JOIN users u ON u.id = s.user_id
+      WHERE EXISTS (
+        SELECT 1
+        FROM sale_items si
+        WHERE si.sale_id = s.id AND COALESCE(si.discount, 0) > 0
+      )
+      ${dateFilter}
+      ORDER BY s.created_at DESC
+    `;
+
+    // ---- total de tickets del período (con o sin descuento) ----
+    const totSql = `
+      SELECT COUNT(*) AS total
+      FROM sales s
+      WHERE 1=1
+      ${dateFilter}
+    `;
+
+    const [rows, [tot]] = await Promise.all([
+      allAsync(rowsSql, params),
+      allAsync(totSql, params),
+    ]);
+
+    // ---- resumen correcto ----
+    const totalTickets = Number(tot?.total || 0);
+    const ticketsConDescuento = rows.length;
+    const totalDescontado = rows.reduce(
+      (acc, r) => acc + Number(r.discount_total_amount || 0), 0
+    );
+    const porcentaje = totalTickets === 0
+      ? 0
+      : Number((ticketsConDescuento / totalTickets) * 100).toFixed(2);
+
+    return res.json({
+      data: rows,
+      summary: {
+        total_tickets: totalTickets,
+        tickets_con_descuento: ticketsConDescuento,
+        porcentaje_tickets_descuento: Number(porcentaje),
+        total_descuentos: Number(totalDescontado.toFixed(2))
+      }
+    });
+  } catch (error) {
+    console.error('Error generando reporte de descuentos:', error);
+    res.status(500).json({ error: 'Error generando reporte de descuentos' });
+  }
+};
+
+
+// ======================================================
+// EXPORTAR REPORTE DE DESCUENTOS A CSV
+// ======================================================
+
+// ======================================================
+// EXPORTAR REPORTE DE DESCUENTOS A CSV (usa exportToCSV)
+// ======================================================
+const exportDiscountCSV = async (req, res) => {
+  try {
+    const { start_date, end_date, period } = req.query;
+
+    // (mismo filtro de fechas que arriba)
+    const now = new Date();
+    let dateFilter = '';
+    const params = [];
+
+    if (period && period !== 'custom') {
+      const start = new Date();
+      if (period === 'today') {
+        dateFilter = 'AND DATE(s.created_at) = DATE(?)';
+        params.push(new Date().toISOString().slice(0, 10));
+      } else if (period === 'week') {
+        start.setDate(now.getDate() - 7);
+        dateFilter = 'AND s.created_at BETWEEN ? AND ?';
+        params.push(start.toISOString(), now.toISOString());
+      } else if (period === 'month') {
+        start.setMonth(now.getMonth() - 1);
+        dateFilter = 'AND s.created_at BETWEEN ? AND ?';
+        params.push(start.toISOString(), now.toISOString());
+      } else if (period === 'year') {
+        start.setFullYear(now.getFullYear() - 1);
+        dateFilter = 'AND s.created_at BETWEEN ? AND ?';
+        params.push(start.toISOString(), now.toISOString());
+      }
+    } else if (start_date && end_date) {
+      dateFilter = 'AND DATE(s.created_at) BETWEEN DATE(?) AND DATE(?)';
+      params.push(start_date, end_date);
+    }
+
+    const sql = `
+      SELECT
+        s.id,
+        s.created_at,
+        u.full_name AS seller_name,
+        s.payment_method,
+        s.subtotal,
+        s.tax,
+        s.total,
+        (
+          SELECT COALESCE(SUM((si.quantity * si.unit_price) - si.subtotal), 0)
+          FROM sale_items si
+          WHERE si.sale_id = s.id
+        ) AS discount_total_amount,
+        (
+          SELECT COALESCE(SUM(si.quantity * si.unit_price), 0)
+          FROM sale_items si
+          WHERE si.sale_id = s.id
+        ) AS gross_amount
+      FROM sales s
+      LEFT JOIN users u ON u.id = s.user_id
+      WHERE EXISTS (
+        SELECT 1 FROM sale_items si
+        WHERE si.sale_id = s.id AND COALESCE(si.discount, 0) > 0
+      )
+      ${dateFilter}
+      ORDER BY s.created_at DESC
+    `;
+
+    const rows = await allAsync(sql, params);
+    if (!rows.length) return res.status(404).json({ error: 'No hay datos de descuentos para exportar.' });
+
+    const shaped = rows.map(r => ({
+      id: r.id,
+      fecha: toLatinoDate(r.created_at),
+      vendedor: r.seller_name || '-',
+      metodo_pago: r.payment_method || '-',
+      bruto: Number(r.gross_amount || 0).toFixed(2),
+      descuento: Number(r.discount_total_amount || 0).toFixed(2),
+      neto_items: Number((r.gross_amount - r.discount_total_amount) || 0).toFixed(2),
+      subtotal_sin_iva: Number(r.subtotal || 0).toFixed(2),
+      total_con_iva: Number(r.total || 0).toFixed(2),
+      pct_descuento: (Number(r.gross_amount) > 0)
+        ? ((Number(r.discount_total_amount) / Number(r.gross_amount)) * 100).toFixed(2) + '%'
+        : '0%'
+    }));
+
+    const fields = [
+      { label: 'ID Venta', value: 'id' },
+      { label: 'Fecha', value: 'fecha' },
+      { label: 'Vendedor', value: 'vendedor' },
+      { label: 'Método de Pago', value: 'metodo_pago' },
+      { label: 'Bruto', value: 'bruto' },
+      { label: 'Descuento', value: 'descuento' },
+      { label: 'Neto Ítems', value: 'neto_items' },
+      { label: 'Subtotal s/IVA', value: 'subtotal_sin_iva' },
+      { label: 'Total c/IVA', value: 'total_con_iva' },
+      { label: '% Desc.', value: 'pct_descuento' }
+    ];
+
+    await exportToCSV(res, `reporte_descuentos_${Date.now()}`, shaped, fields);
+  } catch (error) {
+    console.error('Error exportando CSV de descuentos:', error);
+    res.status(500).json({ error: 'Error exportando CSV de descuentos' });
+  }
+};
+
+// ======================================================
+// EXPORTAR REPORTE DE DESCUENTOS A PDF (con totales y gráfico)
+// ======================================================
+const exportDiscountPDF = async (req, res) => {
+  try {
+    const { start_date, end_date, period } = req.query;
+
+    const now = new Date();
+    let dateFilter = '';
+    const params = [];
+
+    if (period && period !== 'custom') {
+      const start = new Date();
+      if (period === 'week') {
+        start.setDate(now.getDate() - 7);
+        dateFilter = 'AND s.created_at BETWEEN ? AND ?';
+        params.push(start.toISOString(), now.toISOString());
+      } else if (period === 'month') {
+        start.setMonth(now.getMonth() - 1);
+        dateFilter = 'AND s.created_at BETWEEN ? AND ?';
+        params.push(start.toISOString(), now.toISOString());
+      } else if (period === 'year') {
+        start.setFullYear(now.getFullYear() - 1);
+        dateFilter = 'AND s.created_at BETWEEN ? AND ?';
+        params.push(start.toISOString(), now.toISOString());
+      }
+    } else if (start_date && end_date) {
+      dateFilter = 'AND DATE(s.created_at) BETWEEN DATE(?) AND DATE(?)';
+      params.push(start_date, end_date);
+    }
+
+    // === Datos de ventas con descuento ===
+    const sql = `
+  SELECT
+    s.id,
+    s.created_at,
+    u.full_name AS seller_name,
+    s.payment_method,
+    s.subtotal,
+    s.tax,
+    s.total,
+    (
+      SELECT COALESCE(SUM((si.quantity * si.unit_price) - si.subtotal), 0)
+      FROM sale_items si WHERE si.sale_id = s.id
+    ) AS discount_total_amount,
+    (
+      SELECT COALESCE(SUM(si.quantity * si.unit_price), 0)
+      FROM sale_items si WHERE si.sale_id = s.id
+    ) AS gross_amount
+  FROM sales s
+  LEFT JOIN users u ON u.id = s.user_id
+  WHERE EXISTS (
+    SELECT 1 FROM sale_items si
+    WHERE si.sale_id = s.id AND COALESCE(si.discount, 0) > 0
+  )
+  ${dateFilter}
+  ORDER BY s.created_at DESC
+`;
+
+
+    const rows = await allAsync(sql, params);
+    if (!rows.length)
+      return res.status(404).json({ error: 'No hay datos de descuentos para exportar.' });
+
+    // === Datos globales para totales ===
+    const allSales = await allAsync(
+        `SELECT COUNT(*) as total_tickets, SUM(total) as total_monto 
+        FROM sales 
+        WHERE 1=1 
+        ${dateFilter.replace(/s\./g, '')}`, // eliminar alias 's.' si está presente
+        params
+      );
+
+
+    const totalTickets = allSales[0]?.total_tickets || 0;
+    const totalMonto = allSales[0]?.total_monto || 0;
+    const ticketsDescuento = rows.length;
+    const montoDescuento = rows.reduce((acc, r) => acc + (r.discount_total_amount || 0), 0);
+    const montoVentasConDesc = rows.reduce((acc, r) => acc + (r.total || 0), 0);
+
+    const pctTickets = totalTickets > 0 ? ((ticketsDescuento / totalTickets) * 100).toFixed(2) : 0;
+    const pctMonto = totalMonto > 0 ? ((montoDescuento / totalMonto) * 100).toFixed(2) : 0;
+
+    // === PDF ===
+    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=reporte_descuentos_${Date.now()}.pdf`);
+    doc.pipe(res);
+
+    // --- Encabezado ---
+    doc.fontSize(18).font('Helvetica-Bold').text('Reporte de Ventas con Descuentos', { align: 'center' });
+    const periodoLabel =
+      period === 'custom' ? `${start_date} a ${end_date}` : (period || 'personalizado');
+    doc.moveDown(0.3);
+    doc.fontSize(10).text(`Período: ${periodoLabel}`, { align: 'center' });
+    doc.text(`Generado: ${new Date().toLocaleString('es-AR')}`, { align: 'center' });
+    doc.moveDown(1);
+
+    // --- Tabla ---
+    const colWidths = [55, 50, 90, 60, 60, 60, 60, 50];
+    const startX = doc.x;
+    const startY = doc.y;
+    const headers = [
+      'Ticket',
+      'Fecha',
+      'Vendedor',
+      'Método',
+      'Bruto',
+      'Descuento',
+      'Total',
+      '% Desc.'
+    ];
+
+    doc.font('Helvetica-Bold').fontSize(9);
+    headers.forEach((h, i) => {
+      const x = startX + colWidths.slice(0, i).reduce((a, b) => a + b, 0);
+      doc.text(h, x, startY, { width: colWidths[i], align: 'center' });
+    });
+    doc.moveDown(0.5);
+    doc.font('Helvetica').fontSize(8);
+
+    rows.forEach((r) => {
+      const pct = r.gross_amount > 0
+        ? ((r.discount_total_amount / r.gross_amount) * 100).toFixed(2) + '%'
+        : '0%';
+      const fila = [
+        `#${String(r.id).padStart(4, '0')}`,
+        toLatinoDate(r.created_at),
+        r.seller_name || '-',
+        r.payment_method || '-',
+        `$${r.gross_amount.toFixed(2)}`,
+        `$${r.discount_total_amount.toFixed(2)}`,
+        `$${r.total.toFixed(2)}`,
+        pct
+      ];
+
+
+      const y = doc.y;
+      let x = startX;
+      fila.forEach((t, i) => {
+        doc.text(t, x, y, { width: colWidths[i], align: 'center' });
+        x += colWidths[i];
+      });
+      doc.moveDown(0.4);
+    });
+
+    // --- Totales alineados con la grilla ---
+doc.moveDown(1);
+doc.font('Helvetica-Bold').fontSize(9);
+
+const sumTo = (arr, i) => arr.slice(0, i).reduce((a, b) => a + b, 0);
+const padX = 2;
+const lineH = 14;
+
+// mismas columnas que la tabla
+//const colWidths = [55, 50, 90, 60, 60, 60, 60, 50];
+const tableX = doc.page.margins.left;
+
+// línea separadora
+doc.moveTo(tableX, doc.y + 2)
+   .lineTo(tableX + sumTo(colWidths, colWidths.length), doc.y + 2)
+   .strokeColor('#888').lineWidth(0.6).stroke();
+doc.moveDown(0.5);
+
+const totalLabel = (text, val, extra = '') => {
+  const xLabel = tableX + sumTo(colWidths, 3); // ocupa primeras 3 columnas
+  const wLabel = sumTo(colWidths, 3);
+  const xVal = xLabel + wLabel + padX;
+  const wVal = sumTo(colWidths.slice(3)); // columnas restantes
+
+  doc.text(text, xLabel, doc.y, { width: wLabel, align: 'right' });
+  doc.text(val + (extra ? ` ${extra}` : ''), xVal, doc.y, { width: wVal, align: 'left' });
+  doc.moveDown(0.3);
+};
+
+// líneas de totales
+totalLabel('Total ventas:', `$${totalMonto.toFixed(2)}`);
+totalLabel('Tickets con descuento:', `${ticketsDescuento} (${pctTickets}%)`);
+totalLabel('Monto descontado:', `$${montoDescuento.toFixed(2)} (${pctMonto}%)`);
+
+doc.moveDown(1);
+
+    // === Insertar gráfico con quickchart.io ===
+    // === Insertar gráfico con quickchart.io (corregido y codificado) ===
+const chartConfig = {
+  type: 'pie',
+  data: {
+    labels: ['Con descuento', 'Sin descuento'],
+    datasets: [
+      {
+        data: [ticketsDescuento, totalTickets - ticketsDescuento],
+        backgroundColor: ['#4CAF50', '#FFC107'],
+      },
+    ],
+  },
+  options: {
+    plugins: {
+      legend: { position: 'bottom' },
+      title: { display: true, text: 'Distribución de Ventas con y sin Descuento' },
+    },
+  },
+};
+
+// ✅ Codificar correctamente el JSON para URL
+const chartUrl = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}`;
+
+const chartImg = await axios.get(chartUrl, { responseType: 'arraybuffer' });
+const imgBuffer = Buffer.from(chartImg.data, 'binary');
+
+// === Agregar nueva página y gráfico ===
+doc.addPage();
+doc.font('Helvetica-Bold').fontSize(16).text('Distribución de Ventas', { align: 'center' });
+doc.moveDown(0.5);
+doc.image(imgBuffer, {
+  fit: [400, 400],
+  align: 'center',
+  valign: 'center',
+});
+ doc.end();
+  } catch (error) {
+  console.error('Error exportando PDF de descuentos:', error);
+  if (!res.headersSent) {
+    res.status(500).json({ error: 'Error exportando PDF de descuentos' });
+  }
+}
+
+   
+};
+
 
 // ========================= Exports =========================
 module.exports = {
-  // Ventas
   getSalesReport,
   exportToCSV,
   exportToPDF,
-
-  // Vencimientos
+  exportCSV: exportToCSV,  // compatibilidad
+  exportPDF: exportToPDF,  // compatibilidad
   getExpiringProductsReport,
   exportExpiringCSV,
-  exportExpiringPDF
+  exportExpiringPDF,
+  getDiscountSales,
+  exportDiscountCSV,
+  exportDiscountPDF
 };
+

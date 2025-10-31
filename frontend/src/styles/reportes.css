@@ -1,0 +1,74 @@
+/* Contenedor que limita la altura visible de la tabla */
+.table-scroll {
+  /* ajustá a gusto: */
+  max-height: 65vh;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb; /* borde suave */
+  border-radius: 8px;
+}
+
+/* Encabezado verde fijo */
+.table-header-green thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2; /* por encima del body */
+  background-color: #1e8c53; /* 💚 tu verde personalizado */
+  color: #fff;
+}
+
+/* Hacemos que solo el cuerpo scrollee */
+.table-sticky tbody {
+  display: block;
+  max-height: 65vh; /* mismo alto que el contenedor */
+  overflow-y: auto;
+}
+
+/* El thead y cada fila siguen actuando como 'table' para que coincidan los anchos */
+.table-sticky thead,
+.table-sticky tbody tr {
+  display: table;
+  width: 100%;
+  table-layout: fixed; /* columnas con ancho fijo y alineadas */
+}
+
+
+
+/* (Opcional) Quitar doble scroll si el contenedor padre ya tiene overflow */
+.table-scroll .table-sticky tbody {
+  max-height: none; /* el scroll lo maneja el .table-scroll */
+}
+/* === Ajustes de columnas y filas === */
+
+.table-sticky th,
+.table-sticky td {
+  white-space: nowrap;     /* evita que el texto se corte en varias líneas */
+  overflow: hidden;        /* oculta texto que se desborde */
+  text-overflow: ellipsis; /* muestra "..." si el texto es muy largo */
+  vertical-align: middle;  /* centra el texto verticalmente */
+  padding: 6px 8px;        /* reduce la altura de fila */
+  font-size: 0.9rem;       /* ajusta tamaño del texto */
+}
+
+/* Opcional: definir anchos proporcionales */
+.table-sticky th:nth-child(1),
+.table-sticky td:nth-child(1) { width: 8%; }  /* Fecha */
+.table-sticky th:nth-child(2),
+.table-sticky td:nth-child(2) { width: 5%; }  /* Tipo */
+.table-sticky th:nth-child(3),
+.table-sticky td:nth-child(3) { width: 6%; }  /* ID Venta */
+.table-sticky th:nth-child(4),
+.table-sticky td:nth-child(4) { width: 20%; } /* Producto */
+.table-sticky th:nth-child(5),
+.table-sticky td:nth-child(5) { width: 6%; }  /* Cantidad */
+.table-sticky th:nth-child(6),
+.table-sticky td:nth-child(6) { width: 8%; }  /* Precio Unitario */
+.table-sticky th:nth-child(7),
+.table-sticky td:nth-child(7) { width: 8%; }  /* Importe */
+.table-sticky th:nth-child(8),
+.table-sticky td:nth-child(8) { width: 8%; }  /* Descuento */
+.table-sticky th:nth-child(9),
+.table-sticky td:nth-child(9) { width: 8%; }  /* Debe */
+.table-sticky th:nth-child(10),
+.table-sticky td:nth-child(10) { width: 8%; }  /* Haber */
+.table-sticky th:nth-child(11),
+.table-sticky td:nth-child(11) { width: 10%; } /* Método */

@@ -4,33 +4,42 @@ import {
   LayoutDashboard,
   ShoppingCart,
   Package,
-  FileText,
   DollarSign,
   LogOut,
-  User,
   Database,
+  FileText,
 } from "lucide-react";
 import logo from "../assets/avenia.png";
 import "../styles/Layout.css";
 
 const Layout = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [importadorOpen, setImportadorOpen] = useState(false);
-  const location = useLocation();
-  const importadorRef = useRef(null);
 
-  // 🔹 Cierra el menú Importador si hacés clic fuera
+  // Estados separados para cada dropdown
+  const [importadorOpen, setImportadorOpen] = useState(false);
+  const [reportesOpen, setReportesOpen] = useState(false); // NUEVO
+
+  const location = useLocation();
+
+  // Refs separados para detectar click fuera
+  const importadorRef = useRef(null);
+  const reportesRef = useRef(null); // NUEVO
+
+  // 🔹 Cierra cada dropdown si hacés clic fuera
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (importadorRef.current && !importadorRef.current.contains(event.target)) {
         setImportadorOpen(false);
+      }
+      if (reportesRef.current && !reportesRef.current.contains(event.target)) {
+        setReportesOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // 🔹 Mantiene el Importador desplegado al estar en cualquiera de sus subrutas
+  // 🔹 Mantener Importador abierto si estás en /importador/*
   useEffect(() => {
     if (location.pathname.startsWith("/importador")) {
       setImportadorOpen(true);
@@ -39,11 +48,18 @@ const Layout = () => {
     }
   }, [location.pathname]);
 
-  // 🔹 Corrige el Dashboard siempre activo
-  const isActive = (path) => {
-    if (path === "/") {
-      return location.pathname === "/";
+  // 🔹 Mantener Reportes abierto si estás en /reportes/*
+  useEffect(() => {
+    if (location.pathname.startsWith("/reportes")) {
+      setReportesOpen(true);
+    } else {
+      setReportesOpen(false);
     }
+  }, [location.pathname]);
+
+  // 🔹 Active por ruta exacta o inicio del path
+  const isActive = (path) => {
+    if (path === "/") return location.pathname === "/";
     return location.pathname.startsWith(path);
   };
 
@@ -52,12 +68,12 @@ const Layout = () => {
     window.location.href = "/login";
   };
 
+  // Quitamos el item "Reportes" del menú principal
   const menuItems = [
-    { path: "/", label: "Dashboard", icon: LayoutDashboard },
     { path: "/pos", label: "POS", icon: ShoppingCart },
     { path: "/products", label: "Productos", icon: Package },
     { path: "/sales", label: "Ventas", icon: DollarSign },
-    { path: "/reports", label: "Reportes", icon: FileText },
+    { path: "/", label: "Dashboard", icon: LayoutDashboard },
   ];
 
   return (
@@ -65,12 +81,11 @@ const Layout = () => {
       {/* HEADER */}
       <header className="ln-header">
         <div className="ln-header-inner">
-          {/* Logo y título */}
+          {/* Logo */}
           <div className="ln-brand">
             <div className="ln-logo">
               <img src={logo} alt="logo" style={{ width: "90%", height: "70px" }} />
             </div>
-            
           </div>
 
           {/* Navegación principal */}
@@ -90,16 +105,16 @@ const Layout = () => {
               );
             })}
 
-            {/* 🔹 Dropdown Importador */}
+            {/* 🔹 Dropdown: Op.Varias (Importador) */}
             <div className="ln-dropdown" ref={importadorRef}>
               <button
                 className={`ln-nav-link ln-dropdown-toggle ${
                   location.pathname.startsWith("/importador") ? "ln-active" : ""
                 }`}
-                onClick={() => setImportadorOpen(!importadorOpen)}
+                onClick={() => setImportadorOpen((v) => !v)}
               >
                 <Database size={18} />
-                <span>Importador</span>
+                <span>Op.Varias</span>
                 <span className="ms-1">{importadorOpen ? "▲" : "▼"}</span>
               </button>
 
@@ -124,13 +139,59 @@ const Layout = () => {
                     💲 Actualizar Precios
                   </Link>
                   <Link
-                      to="/importador/coeficiente"
-                      className={`ln-dropdown-item ${
-                        location.pathname === "/importador/coeficiente" ? "ln-active" : ""
-                      }`}
-                      onClick={() => setImportadorOpen(true)}
-                    >
-                      ⚙️ Act. con Coeficiente
+                    to="/importador/coeficiente"
+                    className={`ln-dropdown-item ${
+                      location.pathname === "/importador/coeficiente" ? "ln-active" : ""
+                    }`}
+                    onClick={() => setImportadorOpen(true)}
+                  >
+                    ⚙️ Act. con Coeficiente
+                  </Link>
+                </div>
+              )}
+            </div>
+
+            {/* 🔹 Dropdown: Reportes */}
+            <div className="ln-dropdown" ref={reportesRef}>
+              <button
+                className={`ln-nav-link ln-dropdown-toggle ${
+                  location.pathname.startsWith("/reportes") ? "ln-active" : ""
+                }`}
+                onClick={() => setReportesOpen((v) => !v)}
+              >
+                <FileText size={18} />
+                <span>Reportes</span>
+                <span className="ms-1">{reportesOpen ? "▲" : "▼"}</span>
+              </button>
+
+              {reportesOpen && (
+                <div className="ln-dropdown-menu show">
+                  <Link
+                    to="/reportes/ventas"
+                    className={`ln-dropdown-item ${
+                      location.pathname === "/reportes/ventas" ? "ln-active" : ""
+                    }`}
+                    onClick={() => setReportesOpen(true)}
+                  >
+                    📈 Ventas
+                  </Link>
+                  <Link
+                    to="/reportes/vencimientos"
+                    className={`ln-dropdown-item ${
+                      location.pathname === "/reportes/vencimientos" ? "ln-active" : ""
+                    }`}
+                    onClick={() => setReportesOpen(true)}
+                  >
+                    ⏳ Vencimientos
+                  </Link>
+                  <Link
+                    to="/reportes/descuentos"
+                    className={`ln-dropdown-item ${
+                      location.pathname === "/reportes/descuentos" ? "ln-active" : ""
+                    }`}
+                    onClick={() => setReportesOpen(true)}
+                  >
+                    📉 Descuentos
                   </Link>
                 </div>
               )}

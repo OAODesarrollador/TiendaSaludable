@@ -18,7 +18,9 @@ import Importador from './components/Importador';
 import ImportarProductos from './components/ImportarProductos';
 import ActualizarPrecios from './components/actualizarPrecios';
 import ActualizarCoeficiente from './components/ActualizarCoeficiente';
-
+import ReporteVentas from "./pages/reportes/ReporteVentas";
+import ReporteVencimientos from "./pages/reportes/ReporteVencimineto";
+import ReporteDescuentos from "./pages/reportes/ReporteDescuentos";
 
 
 // Componente de ruta protegida
@@ -60,6 +62,13 @@ function App() {
             <Route path="importador/productos" element={<ImportarProductos />} />
             <Route path="importador/precios" element={<ActualizarPrecios />} />
             <Route path="importador/coeficiente" element={<ActualizarCoeficiente />} />
+            {/* Reportes */}
+            <Route path="/reportes/ventas" element={<ReporteVentas />} />
+            <Route path="/reportes/vencimientos" element={<ReporteVencimientos />} />
+            <Route path="/reportes/descuentos" element={<ReporteDescuentos />} />
+
+            {/* (Opcional) Si alguien navega a /reports, redirigimos a /reportes/ventas */}
+            <Route path="/reports" element={<Navigate to="/reportes/ventas" replace />} />
 
           </Route>
       </Routes>

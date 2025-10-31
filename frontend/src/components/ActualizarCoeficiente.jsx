@@ -59,7 +59,7 @@ const ActualizarCoeficiente = () => {
   return (
     <div className="max-w-2xl mx-auto bg-white border rounded-lg shadow-md p-6 mt-8">
       <h2 className="text-2xl font-semibold text-green-700 mb-4">
-        ⚙️ Actualizar Coeficientes por Categoría
+        ⚙️ Actualizar Coeficientes y Precios por Categoría
       </h2>
       {coeficientes.length === 0 ? (
         <p className="text-gray-500 text-center">No hay categorías registradas</p>
