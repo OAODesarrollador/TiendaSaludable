@@ -536,9 +536,12 @@ const Sales = () => {
               : 'bg-blue-100 text-blue-700'
           }`}
         >
-          {sale.type}
+          {sale.type === 'Nota de Crédito'
+            ? 'Nota de Crédito'
+            : `${(sale.payment_method || '').toUpperCase()}`}
         </span>
       </td>
+
       <td className="px-6 py-1 whitespace-nowrap text-sm">
         <div className="flex items-center gap-2">
           {sale.type === 'Venta' && (

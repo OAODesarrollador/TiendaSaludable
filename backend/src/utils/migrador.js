@@ -71,6 +71,34 @@ const run = (query) =>
           supplier, expiration_date, active, created_at, updated_at
         FROM products_old
       `);
+      await run(`
+        CREATE TABLE IF NOT EXISTS cash_sessions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          date DATE UNIQUE NOT NULL,
+          opening_amount REAL NOT NULL,
+          closing_amount REAL,
+          total_income REAL DEFAULT 0,
+          total_expense REAL DEFAULT 0,
+          carried_balance REAL DEFAULT 0,
+          closed INTEGER DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
+      await run(`
+        CREATE TABLE IF NOT EXISTS cash_movements (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL,
+          type TEXT CHECK(type IN ('ingreso','egreso')) NOT NULL,
+          concept TEXT NOT NULL,
+          amount REAL NOT NULL,
+          payment_method TEXT,
+          user_id INTEGER,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (session_id) REFERENCES cash_sessions(id),
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+      `);
 
       console.log('➡️ Eliminando tabla antigua...');
       await run(`DROP TABLE products_old`);

@@ -774,31 +774,32 @@ const getExpirationMessage = (expirationDate) => {
             </button>
           </div>
           
-          <div className="mt-3">
+         
+            <div className="mt-3">
               <label className="block text-sm font-medium text-gray-700 mb-1">Forma de Pago:</label>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setPaymentMethod('efectivo')}
-                  className={`flex-1 py-2 rounded-lg border font-medium ${
-                    paymentMethod === 'efectivo'
-                      ? 'bg-green-600 text-white border-green-600'
-                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                  }`}
-                >
-                  💵 Efectivo
-                </button>
-                <button
-                  onClick={() => setPaymentMethod('tarjeta')}
-                  className={`flex-1 py-2 rounded-lg border font-medium ${
-                    paymentMethod === 'tarjeta'
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                  }`}
-                >
-                  💳 Tarjeta
-                </button>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { key: 'efectivo', label: '💵 Efectivo', color: 'green' },
+                  { key: 'debito', label: '💳 Débito', color: 'blue' },
+                  { key: 'transferencia', label: '🏦 Transferencia', color: 'indigo' },
+                  { key: 'qr', label: '📱 QR', color: 'purple' },
+                  { key: 'tarjeta_credito', label: '💳 Crédito', color: 'orange' }, // opcional
+                ].map(({ key, label, color }) => (
+                  <button
+                    key={key}
+                    onClick={() => setPaymentMethod(key)}
+                    className={`py-2 rounded-lg border font-medium ${
+                      paymentMethod === key
+                        ? `bg-${color}-600 text-white border-${color}-600`
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
-          </div>
+            </div>
+         
   
           <div className="flex gap-2 mt-2">  
             <button

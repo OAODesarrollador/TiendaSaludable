@@ -8,6 +8,8 @@ import {
   LogOut,
   Database,
   FileText,
+  Wallet,
+  
 } from "lucide-react";
 import logo from "../assets/avenia.png";
 import "../styles/Layout.css";
@@ -73,6 +75,7 @@ const Layout = () => {
     { path: "/pos", label: "POS", icon: ShoppingCart },
     { path: "/products", label: "Productos", icon: Package },
     { path: "/sales", label: "Ventas", icon: DollarSign },
+    { path: "/caja", label: "Caja", icon: Wallet }, // 💰 NUEVO
     { path: "/", label: "Dashboard", icon: LayoutDashboard },
   ];
 

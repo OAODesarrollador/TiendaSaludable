@@ -11,7 +11,7 @@ const saleRoutes = require('./src/routes/sale.routes');
 const reportRoutes = require('./src/routes/report.routes');
 const dashboardRoutes = require('./src/routes/dashboard.routes');
 const importadorRoutes = require('./src/routes/importador.routes');
-
+const cashRoutes = require('./src/routes/cash.routes');
 
 // Inicializar base de datos
 const db = require('./src/config/database');
@@ -40,6 +40,7 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/import', importadorRoutes);
 app.use('/api/coeficientes', require('./src/routes/coeficiente.routes'));
+app.use('/api/cash', cashRoutes);
 
 // Ruta de prueba
 app.get('/api/health', (req, res) => {

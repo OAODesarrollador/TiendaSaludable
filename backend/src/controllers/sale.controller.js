@@ -34,6 +34,13 @@ ensureSaleItemsColumns();
 const createSale = async (req, res) => {
   try {
     const { items, payment_method = 'efectivo' } = req.body;
+    
+    const validPayments = ['efectivo', 'qr', 'transferencia', 'debito', 'tarjeta_credito'];
+
+    if (!validPayments.includes(payment_method)) {
+      return res.status(400).json({ error: 'Método de pago no válido' });
+    }
+
     const userId = req.user?.id || 1;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
