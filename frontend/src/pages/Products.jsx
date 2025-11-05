@@ -203,15 +203,14 @@ const handleChange = async (e) => {
 
     try {
       // Convertir a números donde corresponda
-      const payload = {
-        ...formData,
-        purchase_price: parseFloat(normalizePriceInput(formData.purchase_price || '0')),
-        sale_price: parseFloat(normalizePriceInput(formData.sale_price || '0')),
-        // En handleSubmit → payload
-        stock: parseDecimal(formData.stock),
-        min_stock: parseDecimal(formData.min_stock),
-        
-      };
+    const payload = {
+      ...formData,
+      purchase_price: parseFloat(normalizePriceInput(formData.purchase_price || '0')),
+      sale_price: parseFloat(normalizePriceInput(formData.sale_price || '0')),
+      stock: parseDecimal(formData.stock),
+      min_stock: parseDecimal(formData.min_stock),
+    };
+
 
       if (editingProduct) {
         await productsAPI.update(editingProduct.id, payload);

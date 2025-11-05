@@ -70,7 +70,10 @@ export const salesAPI = {
   getRefundsBySale: (saleId) => api.get(`/sales/${saleId}/refunds`),
 
   // ✅ NUEVO: obtener una nota de crédito específica
-  getRefundById: (refundId) => api.get(`/sales/refund/${refundId}`)
+  getRefundById: (refundId) => api.get(`/sales/refund/${refundId}`),
+
+  checkRefund: (saleId) => api.get(`/sales/${saleId}/check-refund`)
+
 };
 
 

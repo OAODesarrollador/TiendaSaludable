@@ -14,6 +14,9 @@ const {
 } = require('../controllers/sale.controller');
 
 const { verifyToken } = require('../middleware/auth');
+const { checkRefundExists } = require('../controllers/sale.controller');
+
+
 
 // ============================================
 // Rutas de Ventas
@@ -35,5 +38,9 @@ router.get('/:id/refunds', verifyToken, getRefundsBySale);
 
 // Obtener detalle de una nota de crédito específica
 router.get('/refund/:refundId', verifyToken, getRefundById);
+
+router.get('/:id/check-refund', verifyToken, checkRefundExists);
+
+
 
 module.exports = router;

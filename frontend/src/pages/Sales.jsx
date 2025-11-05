@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { salesAPI } from '../services/api';
 import { toast } from 'react-toastify';
 import { Eye, Download, Search, IterationCw } from 'lucide-react';
+import axios from 'axios';
 
 const Sales = () => {
   const [sales, setSales] = useState([]);
@@ -89,9 +90,22 @@ const Sales = () => {
   };
 
   // --- Devoluciones: preparar estado ---
-  const openRefundModal = () => {
-    if (!selectedSale) return;
-    // Mapear items: tomar remaining (cantidad disponible a devolver) desde selectedSale.items
+// --- Devoluciones: preparar estado ---
+const openRefundModal = async () => {
+  if (!selectedSale) return;
+
+  try {
+    // 1) Verificación confiable contra backend usando salesAPI (misma baseURL)
+    const { data } = await salesAPI.checkRefund(selectedSale.id);
+
+    if (data?.exists) {
+      toast.warning(
+        `Esta venta ya tiene una Nota de Crédito registrada (ID: ${data.refund?.id})`
+      );
+      return; // 🚫 No abrir modal
+    }
+
+    // 2) Si no existe NC, preparar items y abrir modal
     const items = selectedSale.items.map(it => ({
       product_id: it.product_id,
       product_name: it.product_name,
@@ -99,9 +113,15 @@ const Sales = () => {
       selected: false,
       quantity: 0
     }));
+
     setRefundState({ items, reason: '' });
     setShowRefundModal(true);
-  };
+  } catch (error) {
+    console.error('Error verificando nota de crédito:', error);
+    toast.error('Error al verificar si la venta ya tiene una nota de crédito.');
+  }
+};
+
 
   const toggleSelectItem = (index) => {
     setRefundState(prev => {
@@ -152,11 +172,19 @@ const Sales = () => {
       const response = await salesAPI.createRefund(selectedSale.id, payload);
       toast.success('Nota de crédito creada correctamente');
 
-      // Actualizar vista: recargar detalle y listado
-      const saleResp = await salesAPI.getById(selectedSale.id);
-      setSelectedSale(saleResp.data);
+// 🔄 Actualizar la vista (detalle y listado)
+    const saleResp = await salesAPI.getById(selectedSale.id);
+    setSelectedSale(saleResp.data);
+    loadSales();
+
+    // 🕒 Cerrar ambos modales automáticamente luego de 1.5 segundos
+    setTimeout(() => {
       setShowRefundModal(false);
-      loadSales();
+      setShowModal(false);
+      setSelectedSale(null);
+    }, 1500);
+
+
     } catch (error) {
       console.error('Error creando nota de crédito:', error);
       const msg = (error?.response?.data?.error) || 'Error al crear nota de crédito';
@@ -544,7 +572,7 @@ const Sales = () => {
 
       <td className="px-6 py-1 whitespace-nowrap text-sm">
         <div className="flex items-center gap-2">
-          {sale.type === 'Venta' && (
+          {sale.type === 'Venta' ? (
             <>
               <button
                 onClick={() => handleViewDetails(sale.id)}
@@ -561,9 +589,15 @@ const Sales = () => {
                 <Download size={18} />
               </button>
             </>
+          ) : (
+            // 🧾 Mostrar ticket original en caso de Nota de Crédito
+            <span className="text-xs text-gray-600 italic">
+              Ticket #{sale.sale_id || '—'}
+            </span>
           )}
         </div>
       </td>
+
     </tr>
   ))}
 

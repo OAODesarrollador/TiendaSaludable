@@ -173,26 +173,29 @@ const getAllSales = async (req, res) => {
       [start_date || '1900-01-01', end_date || '2100-12-31', parseInt(limit), parseInt(offset)]
     );
 
-    // 🔹 Traer todas las notas de crédito
-    const refunds = await allAsync(
-      `
-      SELECT 
-        r.id,
-        r.created_at,
-        u.full_name AS seller_name,
-        (r.subtotal * -1) AS subtotal,
-        (r.tax * -1) AS tax,
-        (r.total * -1) AS total,
-        'Nota de Crédito' AS payment_method,
-        'Nota de Crédito' AS type
-      FROM refunds r
-      LEFT JOIN sales s ON r.sale_id = s.id
-      LEFT JOIN users u ON s.user_id = u.id
-      WHERE DATE(r.created_at) BETWEEN DATE(?) AND DATE(?)
-      ORDER BY r.created_at DESC
-      `,
-      [start_date || '1900-01-01', end_date || '2100-12-31']
-    );
+
+    // 🔹 Traer todas las notas de crédito (agregamos sale_id original)
+      const refunds = await allAsync(
+        `
+        SELECT 
+          r.id,
+          r.sale_id,                             -- 🆕 Ticket original
+          r.created_at,
+          u.full_name AS seller_name,
+          (r.subtotal * -1) AS subtotal,
+          (r.tax * -1) AS tax,
+          (r.total * -1) AS total,
+          'Nota de Crédito' AS payment_method,
+          'Nota de Crédito' AS type
+        FROM refunds r
+        LEFT JOIN sales s ON r.sale_id = s.id
+        LEFT JOIN users u ON s.user_id = u.id
+        WHERE DATE(r.created_at) BETWEEN DATE(?) AND DATE(?)
+        ORDER BY r.created_at DESC
+        `,
+        [start_date || '1900-01-01', end_date || '2100-12-31']
+      );
+
 
     // 🔹 Unir ventas + notas de crédito
     const combined = [...sales, ...refunds].sort(
@@ -261,14 +264,30 @@ const getSaleById = async (req, res) => {
 const createRefund = async (req, res) => {
   try {
     const { id: sale_id } = req.params;
-    const { items, reason } = req.body;
+    const { reason, items } = req.body;
 
+    // 🧩 1️⃣ Verificar que exista la venta original
+    const sale = await getAsync('SELECT * FROM sales WHERE id = ?', [sale_id]);
+    if (!sale) {
+      return res.status(404).json({ error: 'Venta no encontrada.' });
+    }
+
+    // 🧩 2️⃣ Control contable: evitar notas duplicadas
+    const existingRefund = await getAsync(
+      'SELECT id FROM refunds WHERE sale_id = ? LIMIT 1',
+      [sale_id]
+    );
+    if (existingRefund) {
+      return res.status(400).json({
+        error: `Esta venta ya tiene una Nota de Crédito registrada (ID: ${existingRefund.id}).`
+      });
+    }
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'No hay productos para devolver' });
     }
 
-    const sale = await getAsync('SELECT * FROM sales WHERE id = ?', [sale_id]);
-    if (!sale) return res.status(404).json({ error: 'Venta no encontrada' });
+    
+
 
     await runAsync('BEGIN TRANSACTION');
     try {
@@ -313,14 +332,16 @@ const createRefund = async (req, res) => {
       }
 
       const taxRate = parseFloat(process.env.IVA_RATE || 21) / 100;
-      const tax = subtotal * taxRate;
-      const total = subtotal + tax;
+      const total = subtotal;
+      const subtotalNoTax = total / (1 + taxRate);
+      const tax = total - subtotalNoTax;
 
       const refundResult = await runAsync(
         `INSERT INTO refunds (sale_id, reason, subtotal, tax, total)
-         VALUES (?, ?, ?, ?, ?)`,
-        [sale_id, reason || null, subtotal, tax, total]
+        VALUES (?, ?, ?, ?, ?)`,
+        [sale_id, reason || null, subtotalNoTax, tax, total]
       );
+
 
       const refundId = refundResult.id;
 
@@ -368,6 +389,39 @@ const getRefundsBySale = async (req, res) => {
     res.status(500).json({ error: 'Error al obtener devoluciones' });
   }
 };
+// ============================================
+// VERIFICAR SI UNA VENTA YA TIENE NOTA DE CRÉDITO (versión robusta)
+// ============================================
+const checkRefundExists = async (req, res) => {
+  try {
+    const { id } = req.params; // sale_id
+
+    // Usamos COUNT para evitar truthy de {} y garantizar booleans
+    const row = await getAsync(
+      'SELECT COUNT(*) AS total FROM refunds WHERE sale_id = ?',
+      [id]
+    );
+
+    const exists = row && row.total && Number(row.total) > 0;
+
+    if (exists) {
+      const refund = await getAsync(
+        'SELECT id, created_at FROM refunds WHERE sale_id = ? ORDER BY id DESC LIMIT 1',
+        [id]
+      );
+      return res.status(200).json({ exists: true, refund });
+    }
+
+    return res.status(200).json({ exists: false });
+  } catch (error) {
+    console.error('Error verificando existencia de nota de crédito:', error);
+    return res.status(500).json({
+      exists: false,
+      error: 'Error interno al verificar nota de crédito'
+    });
+  }
+};
+
 
 // ============================================
 // OBTENER DETALLE DE UNA NOTA DE CRÉDITO POR ID
@@ -460,5 +514,6 @@ module.exports = {
   generateTicketPDF,
   createRefund,
   getRefundsBySale,
-  getRefundById
+  getRefundById,
+  checkRefundExists
 };

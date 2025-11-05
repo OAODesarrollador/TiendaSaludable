@@ -194,32 +194,39 @@ const updateProduct = async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
 
-    // ✅ Obtener producto actual primero
+    // ✅ Obtener producto actual
     const product = await getAsync('SELECT * FROM products WHERE id = ?', [id]);
     if (!product) {
       return res.status(404).json({ error: 'Producto no encontrado' });
     }
 
-    // ✅ Luego determinar categoría y precio de compra
-    const category = updates.category || product.category;
-    const purchase = parseFloat(updates.purchase_price ?? product.purchase_price ?? 0);
-
-    // Obtener coeficiente de la categoría
-    const coefRow = await getAsync('SELECT coefficient FROM category_coefficients WHERE category = ?', [category]);
-    const coef = coefRow ? parseFloat(coefRow.coefficient) : 1.0;
-
-    // Calcular precio de venta redondeado
-    const sale_price = Math.ceil((purchase * coef) / 50) * 50;
-
+    // ✅ Preparar campos dinámicos
     const allowedFields = [
       'sku', 'ean13', 'name', 'category', 'description',
       'purchase_price', 'sale_price', 'stock', 'min_stock',
       'expiration_date', 'supplier', 'active'
     ];
-
     const fields = [];
     const values = [];
 
+    // ✅ Calcular coeficiente
+    const category = updates.category || product.category;
+    const purchase = parseFloat(updates.purchase_price ?? product.purchase_price ?? 0);
+    const coefRow = await getAsync(
+      'SELECT coefficient FROM category_coefficients WHERE category = ?',
+      [category]
+    );
+    const coef = coefRow ? parseFloat(coefRow.coefficient) : 1.0;
+
+    // ✅ Si el usuario mandó un precio manual, se respeta
+    let sale_price = updates.sale_price ?? product.sale_price;
+
+    // Si no se envió sale_price pero se cambió el precio de compra, recalcular
+    if (!updates.sale_price && updates.purchase_price) {
+      sale_price = Math.ceil((purchase * coef) / 50) * 50;
+    }
+
+    // ✅ Cargar los campos modificables
     for (const field of allowedFields) {
       if (Object.prototype.hasOwnProperty.call(updates, field)) {
         const value =
@@ -231,18 +238,23 @@ const updateProduct = async (req, res) => {
       }
     }
 
-    // ✅ Forzar actualización del sale_price recalculado
+    // ✅ Incluir el precio final
     fields.push(`sale_price = ?`);
     values.push(sale_price);
 
+    // ✅ Marcar fecha de actualización
     fields.push('updated_at = CURRENT_TIMESTAMP');
     values.push(id);
 
     const sql = `UPDATE products SET ${fields.join(', ')} WHERE id = ?`;
     await runAsync(sql, values);
 
-    // Sincronizar categoría en coeficientes
-    await runAsync(`INSERT OR IGNORE INTO category_coefficients (category, coefficient) VALUES (?, ?)`, [category, coef]);
+    // ✅ Sincronizar categoría en coeficientes
+    await runAsync(
+      `INSERT OR IGNORE INTO category_coefficients (category, coefficient)
+       VALUES (?, ?)`,
+      [category, coef]
+    );
 
     const updatedProduct = await getAsync('SELECT * FROM products WHERE id = ?', [id]);
 
