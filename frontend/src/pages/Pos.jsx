@@ -3,6 +3,7 @@ import { productsAPI, salesAPI } from '../services/api';
 import { toast } from 'react-toastify';
 import { Search, Trash2, Plus, Minus, ShoppingCart, Printer, Download, X, Calculator } from 'lucide-react';
 import logo from '../assets/Avenia.png';
+import { formatFechaHoraAR } from "../config/timezone";
 
 const POS = () => {
   const [products, setProducts] = useState([]);
@@ -206,6 +207,10 @@ const POS = () => {
     if (!printWindow) return toast.error('No se pudo abrir la ventana de impresión');
 
     const saleItems = lastSale.items ?? lastSale.line_items ?? lastSale.details ?? [];
+
+    const fechaHora = formatFechaHoraAR(lastSale?.created_at ?? Date.now());
+
+
     
     const items = saleItems.map((it, idx) => {
       const name = it.name ?? it.product_name ?? it.product?.name ?? `Producto ${idx+1}`;
@@ -249,7 +254,7 @@ const POS = () => {
         <hr style="border:1px solid gray; margin:6px 0;">
 
         <div style="font-size:13px; solid; margin-bottom:8px;">
-          <span style="font-weight:bold;">Ticket #${lastSale.id}</span> - Fecha: ${new Date(lastSale.created_at ?? lastSale.date ?? Date.now()).toLocaleString()}
+          <span style="font-weight:bold;">Ticket #${lastSale.id}</span> - Fecha: ${fechaHora}
         </div>
 
         <hr style="border: 1px solid gray; width: 100%; margin-top: 8px;">
@@ -971,18 +976,8 @@ const getExpirationMessage = (expirationDate) => {
 
             <div className="d-flex justify-content-between w-100">
               <span>Ticket #{lastSale.id}</span>
-              <span>
-                {new Date(lastSale.created_at ?? lastSale.date ?? Date.now())
-                  .toLocaleDateString("es-AR", { timeZone: "America/Argentina/Buenos_Aires" })}
-                {" - "}
-                {new Date(lastSale.created_at ?? lastSale.date ?? Date.now())
-                  .toLocaleTimeString("es-AR", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    second: "2-digit",
-                    timeZone: "America/Argentina/Buenos_Aires"
-                  })}
-              </span>
+              <span>{formatFechaHoraAR(lastSale?.created_at ?? lastSale?.date ?? Date.now())}</span>
+
             </div>
 
             <div ref={ticketRef} style={{ maxHeight: '52vh', overflowY: 'auto', marginTop: 12 }}>

@@ -476,7 +476,18 @@ const generateTicketPDF = async (req, res) => {
     doc.moveDown(0.5);
 
     doc.fontSize(9).text(`Ticket #${sale.id}`);
-    doc.fontSize(8).text(`Fecha: ${new Date(sale.created_at).toLocaleString('es-AR')}`);
+
+    // CORRECCIÓN ZONA HORARIA ARGENTINA (GMT-3)
+    
+    const fmtAR = new Intl.DateTimeFormat('es-AR', {
+      dateStyle: 'short',
+      timeStyle: 'medium',
+      timeZone: 'America/Argentina/Buenos_Aires'
+    });
+
+    doc.fontSize(9).text(`Ticket #${sale.id}`);
+    doc.fontSize(8).text(`Fecha: ${fmtAR.format(new Date(sale.created_at))}`);
+
     doc.text(`Vendedor: ${sale.seller_name}`);
     doc.text(`Pago: ${sale.payment_method.toUpperCase()}`);
     doc.moveDown(0.5);
@@ -546,8 +557,16 @@ const generateRefundPDF = async (req, res) => {
     doc.moveDown(0.5);
 
     // Info general
+    // CORRECCIÓN ZONA HORARIA ARGENTINA (GMT-3)
+    const fmtAR = new Intl.DateTimeFormat('es-AR', {
+      dateStyle: 'short',
+      timeStyle: 'medium',
+      timeZone: 'America/Argentina/Buenos_Aires'
+    });
+
     doc.fontSize(9).text(`Nota #${refund.id}`);
-    doc.fontSize(8).text(`Fecha: ${new Date(refund.created_at).toLocaleString('es-AR')}`);
+    doc.fontSize(8).text(`Fecha: ${fmtAR.format(new Date(refund.created_at))}`);
+
     doc.text(`Vendedor: ${refund.seller_name}`);
     doc.text(`Ticket original: #${refund.sale_ticket}`);
     doc.moveDown(0.5);

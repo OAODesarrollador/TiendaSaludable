@@ -1,4 +1,18 @@
+// =======================================================
+// Configuración global del entorno y zona horaria (GMT-3)
+// =======================================================
 require('dotenv').config();
+process.env.TZ = process.env.TZ || 'America/Argentina/Buenos_Aires';
+
+console.log('🕒 Zona horaria activa:', process.env.TZ);
+console.log('🕐 Hora local actual:', new Date().toLocaleString('es-AR', {
+  timeZone: process.env.TZ,
+  hour12: false
+}));
+
+// =======================================================
+// Dependencias
+// =======================================================
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
@@ -20,7 +34,9 @@ db.initialize();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// =======================================================
 // Middlewares
+// =======================================================
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
   credentials: true
@@ -32,7 +48,9 @@ app.use(morgan('dev'));
 // Servir archivos estáticos (códigos de barras, PDFs)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// =======================================================
 // Rutas
+// =======================================================
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/sales', saleRoutes);
@@ -45,8 +63,9 @@ app.use('/api/cash', cashRoutes);
 // Ruta de prueba
 app.get('/api/health', (req, res) => {
   res.json({ 
-    status: 'OK', 
+    status: 'OK',
     message: 'Servidor funcionando correctamente',
+    hora_local: new Date().toLocaleString('es-AR', { timeZone: process.env.TZ }),
     timestamp: new Date().toISOString()
   });
 });
@@ -63,12 +82,10 @@ app.use((err, req, res, next) => {
     error: err.message || 'Error interno del servidor'
   });
 });
-// Rutas de coeficientes
 
-
-
-
+// =======================================================
 // Iniciar servidor
+// =======================================================
 app.listen(PORT, () => {
   console.log(`\n🌿 Servidor iniciado en http://localhost:${PORT}`);
   console.log(`📊 Ambiente: ${process.env.NODE_ENV || 'development'}`);
