@@ -299,13 +299,11 @@ const createRefund = async (req, res) => {
           'SELECT * FROM sale_items WHERE sale_id = ? AND product_id = ?',
           [sale_id, item.product_id]
         );
+
         if (!saleItem) {
           await runAsync('ROLLBACK');
           return res.status(400).json({ error: `El producto ID ${item.product_id} no pertenece a esta venta` });
         }
-
-        // (Opcional: validar restante si ya hay devoluciones previas)
-        // Aquí podrías sumar devoluciones previas y limitar el max "remaining"
 
         if (item.quantity > saleItem.quantity) {
           await runAsync('ROLLBACK');
@@ -314,34 +312,44 @@ const createRefund = async (req, res) => {
           });
         }
 
-        const itemSubtotal = saleItem.unit_price * item.quantity;
-        subtotal += itemSubtotal;
+        // ✅ PRECIO EFECTIVO COBRADO POR UNIDAD (ya incluye descuento)
+        //    Tomamos el subtotal del ítem original (neto) y lo prorrateamos por cantidad.
+        const effectiveUnitNet = saleItem.quantity > 0
+          ? Number((saleItem.subtotal / saleItem.quantity).toFixed(2))
+          : 0;
+
+        // ✅ Subtotal del ítem a devolver usando el precio neto (con descuento)
+        const itemSubtotal = Number((effectiveUnitNet * item.quantity).toFixed(2));
+        subtotal = Number((subtotal + itemSubtotal).toFixed(2));
 
         refundItems.push({
           product_id: saleItem.product_id,
           product_name: saleItem.product_name,
           quantity: item.quantity,
-          unit_price: saleItem.unit_price,
+          // Guardamos el unit_price de la devolución como el neto efectivo
+          // para que el detalle refleje el valor realmente devuelto.
+          unit_price: effectiveUnitNet,
           subtotal: itemSubtotal
         });
 
+        // Reponer stock
         await runAsync('UPDATE products SET stock = stock + ? WHERE id = ?', [
           item.quantity,
           saleItem.product_id
         ]);
       }
 
+      // ✅ Descomponer IVA del total neto (subtotal incluye IVA)
       const taxRate = parseFloat(process.env.IVA_RATE || 21) / 100;
       const total = subtotal;
-      const subtotalNoTax = total / (1 + taxRate);
-      const tax = total - subtotalNoTax;
+      const subtotalNoTax = Number((total / (1 + taxRate)).toFixed(2));
+      const tax = Number((total - subtotalNoTax).toFixed(2));
 
       const refundResult = await runAsync(
         `INSERT INTO refunds (sale_id, reason, subtotal, tax, total)
-        VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)`,
         [sale_id, reason || null, subtotalNoTax, tax, total]
       );
-
 
       const refundId = refundResult.id;
 
@@ -503,6 +511,80 @@ const generateTicketPDF = async (req, res) => {
     res.status(500).json({ error: 'Error al generar ticket PDF' });
   }
 };
+// ============================================
+// GENERAR PDF DE NOTA DE CRÉDITO
+// ============================================
+const generateRefundPDF = async (req, res) => {
+  try {
+    const { id } = req.params; // refund_id
+    const refund = await getAsync(`
+      SELECT r.*, s.id AS sale_ticket, u.full_name AS seller_name
+      FROM refunds r
+      LEFT JOIN sales s ON r.sale_id = s.id
+      LEFT JOIN users u ON s.user_id = u.id
+      WHERE r.id = ?
+    `, [id]);
+
+    if (!refund) return res.status(404).json({ error: 'Nota de crédito no encontrada' });
+
+    const items = await allAsync(
+      'SELECT * FROM refund_items WHERE refund_id = ? ORDER BY id ASC',
+      [id]
+    );
+
+    const doc = new PDFDocument({ size: [226.77, 841.89], margin: 20 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=nota_credito_${id}.pdf`);
+    doc.pipe(res);
+
+    // Encabezado
+    doc.fontSize(16).fillColor('red').text('🧾 NOTA DE CRÉDITO', { align: 'center' });
+    doc.fillColor('black').fontSize(10).text('Tienda Natural', { align: 'center' });
+    doc.text('Productos Naturales y Dietéticos', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(8).text('─'.repeat(38), { align: 'center' });
+    doc.moveDown(0.5);
+
+    // Info general
+    doc.fontSize(9).text(`Nota #${refund.id}`);
+    doc.fontSize(8).text(`Fecha: ${new Date(refund.created_at).toLocaleString('es-AR')}`);
+    doc.text(`Vendedor: ${refund.seller_name}`);
+    doc.text(`Ticket original: #${refund.sale_ticket}`);
+    doc.moveDown(0.5);
+    doc.text('─'.repeat(38), { align: 'center' });
+    doc.moveDown(0.5);
+
+    // Items
+    doc.fontSize(8);
+    items.forEach(it => {
+      doc.text(it.product_name);
+      const line = `  ${it.quantity} x $${it.unit_price.toFixed(2)} = $${it.subtotal.toFixed(2)}`;
+      doc.text(line);
+      doc.moveDown(0.3);
+    });
+
+    doc.moveDown(0.5);
+    doc.text('─'.repeat(38), { align: 'center' });
+    doc.moveDown(0.5);
+
+    // Totales
+    doc.fontSize(9);
+    doc.text(`Subtotal: $${refund.subtotal.toFixed(2)}`, { align: 'right' });
+    doc.text(`IVA (${process.env.IVA_RATE || 21}%): $${refund.tax.toFixed(2)}`, { align: 'right' });
+    doc.fontSize(11).text(`TOTAL: $${refund.total.toFixed(2)}`, { align: 'right' });
+
+    // Pie
+    doc.moveDown(1);
+    doc.fontSize(8).text('Documento generado automáticamente', { align: 'center' });
+    doc.text('Referencia contable - No válida como factura', { align: 'center' });
+
+    doc.end();
+  } catch (error) {
+    console.error('Error generando PDF de nota de crédito:', error);
+    res.status(500).json({ error: 'Error al generar PDF de nota de crédito' });
+  }
+};
+
 
 // ============================================
 // EXPORTS
@@ -512,6 +594,7 @@ module.exports = {
   getAllSales,
   getSaleById,
   generateTicketPDF,
+  generateRefundPDF,
   createRefund,
   getRefundsBySale,
   getRefundById,

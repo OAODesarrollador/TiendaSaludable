@@ -81,6 +81,24 @@ const Sales = () => {
     }
   };
 
+    const handleDownloadRefundPDF = async (refundId) => {
+    try {
+      const response = await salesAPI.getRefundPDF(refundId);
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `nota_credito_${refundId}.pdf`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+      toast.success('Nota de crédito descargada');
+    } catch (error) {
+      console.error('Error descargando nota de crédito:', error);
+      toast.error('Error al descargar nota de crédito');
+    }
+  };
+
+
   const handleFilterChange = (e) => {
     setFilters({ ...filters, [e.target.name]: e.target.value });
   };
@@ -90,7 +108,7 @@ const Sales = () => {
   };
 
   // --- Devoluciones: preparar estado ---
-// --- Devoluciones: preparar estado ---
+
 const openRefundModal = async () => {
   if (!selectedSale) return;
 
@@ -162,27 +180,51 @@ const openRefundModal = async () => {
       return;
     }
 
-    try {
-      const payload = {
-        sale_id: selectedSale.id,
-        items: itemsToReturn,
-        reason: refundState.reason
+try {
+  const payload = {
+    sale_id: selectedSale.id,
+    items: itemsToReturn,
+    reason: refundState.reason
+  };
+
+  // 1️⃣ Crear la nota de crédito en backend
+  const response = await salesAPI.createRefund(selectedSale.id, payload);
+  const refund = response.data.refund;
+  toast.success('Nota de crédito creada correctamente');
+  printRefundTicket(response.data.refund);
+
+  // 2️⃣ Descargar e imprimir automáticamente la Nota de Crédito
+  try {
+    const pdfResponse = await salesAPI.getRefundPDF(refund.id);
+    const blob = new Blob([pdfResponse.data], { type: 'application/pdf' });
+    const url = window.URL.createObjectURL(blob);
+
+    // Abre una nueva ventana para impresión directa
+    const pdfWindow = window.open(url);
+    if (pdfWindow) {
+      pdfWindow.onload = () => {
+        pdfWindow.print();
       };
+    } else {
+      toast.warning('El navegador bloqueó la ventana de impresión automática');
+    }
+  } catch (err) {
+    console.error('Error generando/imprimiendo PDF:', err);
+    toast.error('No se pudo imprimir la nota de crédito automáticamente');
+  }
 
-      const response = await salesAPI.createRefund(selectedSale.id, payload);
-      toast.success('Nota de crédito creada correctamente');
+  // 3️⃣ Actualizar la vista (detalle y listado)
+  const saleResp = await salesAPI.getById(selectedSale.id);
+  setSelectedSale(saleResp.data);
+  loadSales();
 
-// 🔄 Actualizar la vista (detalle y listado)
-    const saleResp = await salesAPI.getById(selectedSale.id);
-    setSelectedSale(saleResp.data);
-    loadSales();
+  // 4️⃣ Cerrar ambos modales automáticamente luego de 2 segundos
+  setTimeout(() => {
+    setShowRefundModal(false);
+    setShowModal(false);
+    setSelectedSale(null);
+  }, 2000);
 
-    // 🕒 Cerrar ambos modales automáticamente luego de 1.5 segundos
-    setTimeout(() => {
-      setShowRefundModal(false);
-      setShowModal(false);
-      setSelectedSale(null);
-    }, 1500);
 
 
     } catch (error) {
@@ -191,6 +233,112 @@ const openRefundModal = async () => {
       toast.error(msg);
     }
   };
+
+const printRefundTicket = (refund) => {
+  if (!refund) return;
+
+  const printWindow = window.open('', '_blank', 'width=400,height=700,left=100,top=50,resizable=yes,scrollbars=yes');
+  if (!printWindow) {
+    toast.error('No se pudo abrir la ventana de impresión');
+    return;
+  }
+
+  const items = refund.items.map((it, idx) => {
+    const name = it.product_name ?? `Producto ${idx + 1}`;
+    const qty = it.quantity ?? 1;
+    const price = it.unit_price ?? 0;
+    const subtotal = it.subtotal ?? (qty * price);
+    return `
+      <div style="padding:4px 0;">
+        <div style="display:flex; justify-content:space-between; font-size:13px;">
+          <div style="width:50%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${name}</div>
+          <div style="width:16%; text-align:right;">${qty}</div>
+          <div style="width:33%; text-align:right;">${subtotal.toFixed(2)}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const content = `
+    <div style="font-family: Arial, sans-serif; font-size: 13px; color:black; width:280px; margin: auto; padding:10px; background:#fff;">
+      <div style="text-align:center; margin-bottom:8px;">
+        <p style="font-size:18px; color:#b91c1c; font-weight:bold;">🧾 NOTA DE CRÉDITO</p>
+        <img src="/src/assets/Avenia.png" alt="logo" style="width:130px; height:auto; padding:10px;" />
+        <p style="font-size:11px; margin:0;">Faustino Allende 1034 - Córdoba, Argentina</p>
+        <p style="font-size:11px; margin:0;">Tel: +54 351 654 4601</p>
+        <p style="font-size:11px;">Instagram: @avenia.ar</p>
+      </div>
+
+      <hr style="border:1px solid gray; margin:6px 0;">
+      <div style="font-size:13px; margin-bottom:8px;">
+        <span style="font-weight:bold;">Nota #${refund.id}</span> — Fecha: ${new Date(refund.created_at).toLocaleString('es-AR')}
+        <br>
+        <span style="font-weight:bold;">Ticket Original:</span> #${refund.sale_id}
+      </div>
+
+      <hr style="border:1px solid gray; margin:6px 0;">
+      <div style="display:flex; justify-content:space-between; font-size:13px; padding:4px 0;">
+        <div style="width:50%;">Producto</div>
+        <div style="width:16%; text-align:right;">Cant.</div>
+        <div style="width:33%; text-align:right;">Total</div>
+      </div>
+      <div>${items}</div>
+
+      <hr style="border:1px solid gray; margin:6px 0;">
+      <div style="margin-top:12px; font-size:13px;">
+        <div style="display:flex; justify-content:space-between;">
+          <span>Subtotal:</span>
+          <span>$${refund.subtotal.toFixed(2)}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between;">
+          <span>IVA (21%):</span>
+          <span>$${refund.tax.toFixed(2)}</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-weight:bold; margin-top:8px;">
+          <span>TOTAL DEVUELTO:</span>
+          <span>$${refund.total.toFixed(2)}</span>
+        </div>
+      </div>
+
+      <hr style="border:1px solid gray; margin:6px 0;">
+      <div style="text-align:center; font-size:11px;">
+        <p>Documento generado automáticamente</p>
+        <p>NO VÁLIDO COMO FACTURA</p>
+      </div>
+    </div>
+  `;
+
+  const styles = `
+    <style>
+      @media print {
+        @page { size: 80mm auto; margin: 5mm; }
+        body { -webkit-print-color-adjust: exact; margin:0; padding:0; }
+      }
+      body { background:#f5f5f5; font-family: Arial, sans-serif; padding:0; margin:0; }
+    </style>
+  `;
+
+  const printScript = `
+    <script>
+      window.onload = function() { window.print(); };
+    </script>
+  `;
+
+  printWindow.document.write(`
+    <html>
+      <head>
+        <title>Nota de Crédito #${refund.id}</title>
+        ${styles}
+      </head>
+      <body>
+        ${content}
+        ${printScript}
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+};
+
 
   // Componente Modal de Detalle usando Portal
   const DetailModal = () => {
@@ -325,7 +473,14 @@ const openRefundModal = async () => {
                       <div className="text-right">
                         <div className="text-sm font-semibold">${r.total.toFixed(2)}</div>
                         <div className="text-xs text-gray-500">Motivo: {r.reason || '-'}</div>
+                        <button
+                          onClick={() => handleDownloadRefundPDF(r.id)}
+                          className="mt-2 text-xs text-red-600 hover:text-red-800 underline"
+                        >
+                          Descargar PDF
+                        </button>
                       </div>
+
                     </div>
                     <div className="mt-2 text-xs">
                       {r.items && r.items.map(it => (

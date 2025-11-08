@@ -72,6 +72,9 @@ export const salesAPI = {
   // ✅ NUEVO: obtener una nota de crédito específica
   getRefundById: (refundId) => api.get(`/sales/refund/${refundId}`),
 
+  // 🧾 NUEVO: obtener PDF de una nota de crédito
+  getRefundPDF: (refundId) => api.get(`/sales/refund/${refundId}/pdf`, { responseType: 'blob' }),
+
   checkRefund: (saleId) => api.get(`/sales/${saleId}/check-refund`)
 
 };

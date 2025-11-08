@@ -8,6 +8,7 @@ const {
   getAllSales,
   getSaleById,
   generateTicketPDF,
+  generateRefundPDF, // 🆕 importar nueva función
   createRefund,        // ✅ Nuevo controlador: crear nota de crédito
   getRefundsBySale,    // ✅ Obtener todas las devoluciones de una venta
   getRefundById        // ✅ Obtener una nota de crédito por ID
@@ -41,6 +42,7 @@ router.get('/refund/:refundId', verifyToken, getRefundById);
 
 router.get('/:id/check-refund', verifyToken, checkRefundExists);
 
+router.get('/refund/:id/pdf', generateRefundPDF);
 
 
 module.exports = router;
