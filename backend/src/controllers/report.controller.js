@@ -57,7 +57,7 @@ function buildSalesQuery(query) {
   const params = [];
 
   if (p === 'today') {
-    dateCondition = 'AND DATE(s.created_at) = DATE(?)';
+    dateCondition = 'AND DATE(s.created_at, "localtime") = DATE(?)';
     params.push(today);
   } else if (p === 'week') {
     const weekAgo = new Date(now);
@@ -82,7 +82,7 @@ function buildSalesQuery(query) {
       err.status = 422;
       throw err;
     }
-    dateCondition = 'AND DATE(s.created_at) BETWEEN DATE(?) AND DATE(?)';
+    dateCondition = 'AND DATE(s.created_at, "localtime") BETWEEN DATE(?) AND DATE(?)';
     params.push(s, e);
   } else {
     const err = new Error('Período inválido o no soportado.');
@@ -659,7 +659,7 @@ const getDiscountSales = async (req, res) => {
     if (period && period !== 'custom') {
       const start = new Date();
       if (period === 'today') {
-        dateFilter = 'AND DATE(s.created_at) = DATE(?)';
+        dateFilter = 'AND DATE(s.created_at,"localtime") = DATE(?)';
         params.push(new Date().toISOString().slice(0, 10));
       } else if (period === 'week') {
         start.setDate(now.getDate() - 7);
@@ -675,7 +675,7 @@ const getDiscountSales = async (req, res) => {
         params.push(start.toISOString(), now.toISOString());
       }
     } else if (start_date && end_date) {
-      dateFilter = 'AND DATE(s.created_at) BETWEEN DATE(?) AND DATE(?)';
+      dateFilter = 'AND DATE(s.created_at,"localtime") BETWEEN DATE(?) AND DATE(?)';
       params.push(start_date, end_date);
     }
 
@@ -786,7 +786,7 @@ const exportDiscountCSV = async (req, res) => {
     if (period && period !== 'custom') {
       const start = new Date();
       if (period === 'today') {
-        dateFilter = 'AND DATE(s.created_at) = DATE(?)';
+        dateFilter = 'AND DATE(s.created_at, "localtime") = DATE(?)';
         params.push(new Date().toISOString().slice(0, 10));
       } else if (period === 'week') {
         start.setDate(now.getDate() - 7);
@@ -802,7 +802,7 @@ const exportDiscountCSV = async (req, res) => {
         params.push(start.toISOString(), now.toISOString());
       }
     } else if (start_date && end_date) {
-      dateFilter = 'AND DATE(s.created_at) BETWEEN DATE(?) AND DATE(?)';
+      dateFilter = 'AND DATE(s.created_at, "localtime") BETWEEN DATE(?) AND DATE(?)';
       params.push(start_date, end_date);
     }
 

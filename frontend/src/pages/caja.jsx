@@ -10,6 +10,13 @@ import {
   Modal,
   Spinner,
 } from "react-bootstrap";
+import jsPDF from "jspdf";
+import ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
+
+import { getCurrentARDate, getCurrentARTimestamp } from "../config/timezoneF";
+
+
 const Caja = () => {
   const [session, setSession] = useState(null);
   const [pending, setPending] = useState(false);
@@ -26,6 +33,9 @@ const Caja = () => {
   const [closingSummary, setClosingSummary] = useState(null); // 🔹 nuevo
   const [selectedDate, setSelectedDate] = useState("");
   const [confirmDate, setConfirmDate] = useState(""); // 🔹 para confirmar fecha en cierre
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewData, setPreviewData] = useState([]);
+  const [showPDFPreview, setShowPDFPreview] = useState(false);
 
 
   const token = localStorage.getItem("token");
@@ -37,9 +47,10 @@ const Caja = () => {
   try {
     const res = await api.get("/session");
     setSession(res.data.session);
-    // fijar la fecha visible/usable para hoy
-    const isoToday = new Date().toISOString().slice(0, 10);
-    setSelectedDate(isoToday);
+    // Solo inicializar si está vacío (no pisar la elección del usuario)
+    if (!selectedDate) {
+      setSelectedDate(getCurrentARDate());
+    }
   } catch (err) {
     console.error(err);
   }
@@ -54,28 +65,29 @@ const Caja = () => {
     }
   };
       const fetchReport = async () => {
-      try {
-        const isoToday = new Date().toISOString().slice(0, 10);
+  try {
+    const hoyAR = getCurrentARDate(); // ← fecha local Argentina (yyyy-mm-dd)
 
-        let qs = "";
-        if (period === "today") {
-          // ✅ "Hoy" SIEMPRE es hoy (no depende de selectedDate)
-          qs = `period=custom&start_date=${isoToday}&end_date=${isoToday}`;
-        } else if (period === "custom") {
-          // ✅ Fecha específica elegida por el usuario
-          const d = selectedDate || isoToday;
-          qs = `period=custom&start_date=${d}&end_date=${d}`;
-        } else {
-          // week | month | year
-          qs = `period=${period}`;
-        }
+    let qs = "";
+    if (period === "today") {
+      // “Hoy” SIEMPRE es hoy en AR
+      qs = `period=custom&start_date=${hoyAR}&end_date=${hoyAR}`;
+    } else if (period === "custom") {
+      // Fecha elegida por el usuario; si está vacía, usar hoy AR
+      const d = selectedDate || hoyAR;
+      qs = `period=custom&start_date=${d}&end_date=${d}`;
+    } else {
+      // week | month | year
+      qs = `period=${period}`;
+    }
 
-        const res = await api.get(`/report?${qs}`);
-        setReport(res.data);
-      } catch (err) {
-        console.error(err);
-      }
-    };
+    const res = await api.get(`/report?${qs}`);
+    setReport(res.data);
+  } catch (err) {
+    console.error(err);
+  }
+};
+
 
   // 🔹 Abrir caja
   const handleOpenCaja = async () => {
@@ -174,6 +186,12 @@ const Caja = () => {
   const handleAddMovement = async (e) => {
     e.preventDefault();
     try {
+      if (!session || session.closed) {
+        setMessage("⚠️ No hay caja abierta para registrar movimientos.");
+        setShowMessageModal(true);
+        return;
+      }
+
       await api.post("/movement", { type, concept, amount });
       setConcept("");
       setAmount("");
@@ -185,9 +203,271 @@ const Caja = () => {
       setShowMessageModal(true);
     }
   };
-  const handleExport = (fmt) => {
-    window.open(`/api/cash/report?period=${period}&format=${fmt}`, "_blank");
-  };
+
+  
+
+// 🧾 Exportar resumen de sesiones a PDF (robusto para Vite)
+const handleExportPDF = async () => {
+  try {
+    if (!report?.sessions || report.sessions.length === 0) {
+      alert("No hay datos para exportar.");
+      return;
+    }
+
+    // ⬇️ Import dinámico: evita problemas de plugin no registrado
+    const { default: autoTable } = await import("jspdf-autotable");
+    const doc = new jsPDF();
+
+    const fechaReporte = getCurrentARTimestamp();
+    const fechaCaja    = session?.date || getCurrentARDate();
+    const estadoCaja   = session?.closed ? "CERRADA" : "ABIERTA";
+
+    // Encabezado
+    doc.setFontSize(14);
+    doc.text("Resumen de Caja - Tienda Natural", 14, 15);
+    doc.setFontSize(10);
+    doc.text(`Generado: ${fechaReporte}`, 14, 22);
+    doc.text(`Caja del ${fechaCaja} — Estado: ${estadoCaja}`, 14, 28);
+
+    // Armar filas (incluye ventas discriminadas si las tenés en report.sessions[i].salesByMethod)
+    const rows = report.sessions.map((r) => {
+  const ventas = r.salesByMethod || {};
+  const metodos = Object.keys(ventas)
+    .filter((k) => k !== "total")
+    .map((m) => `${m}: $${Number(ventas[m] || 0).toFixed(2)}`)
+    .join("\n");
+
+  // 🟢 Buscar movimientos por tipo (ingresos/egresos)
+  const movimientosIngreso = report.movements
+    ?.filter(m => m.date === r.date && m.type === "ingreso")
+    .map(m => `• ${m.concept}: $${Number(m.amount).toFixed(2)}`)
+    .join("\n") || "—";
+
+// 🟢 Egresos = egresos manuales (movements) + notas de crédito (sales) del mismo día
+
+    const egresosMovs = (report.movements || [])
+      .filter(m => m.date === r.date && m.type === "egreso");
+
+    const manualExpenseTotal = egresosMovs
+      .reduce((acc, m) => acc + Number(m.amount || 0), 0);
+
+    const refundsOfDay = (report.sales || [])
+      .filter(s => s.type === "nota_credito" && (s.date || "").slice(0,10) === r.date);
+
+    const refundsTotal = refundsOfDay
+      .reduce((acc, s) => acc + Math.abs(Number(s.amount ?? s.total ?? 0)), 0);
+
+    const movimientosEgreso = [
+      `Egresos manuales: $${manualExpenseTotal.toFixed(2)}`,
+      `Notas de crédito: $${refundsTotal.toFixed(2)}`,
+     
+    ].join("\n");
+
+    return [
+      r.date,
+      `$${Number(r.opening || 0).toFixed(2)}`,
+      movimientosIngreso,
+      metodos || "—",
+      movimientosEgreso,
+      `$${Number(r.total || 0).toFixed(2)}`
+    ];
+  });
+
+
+    // Tabla
+    autoTable(doc, {
+      startY: 35,
+      head: [["Fecha", "Apertura", "Ingresos", "Ventas (por método)", "Egresos", "Total"]],
+      body: rows,
+      styles: { fontSize: 9, cellPadding: 3 },
+      headStyles: { fillColor: [52, 152, 219], textColor: 255, halign: "center" },
+      alternateRowStyles: { fillColor: [245, 245, 245] },
+    });
+
+    // Total general
+// 🧾 Totales al pie de tabla como footer con ventas por método
+const totalApertura = report.sessions.reduce((a, r) => a + Number(r.opening || 0), 0);
+const totalIngresos = report.sessions.reduce((a, r) => a + Number(r.income || 0), 0);
+const totalEgresos = report.sessions.reduce((a, r) => a + Number(r.expense || 0), 0);
+const totalGeneral = report.sessions.reduce((a, r) => a + Number(r.total || 0), 0);
+
+// 🔹 Calcular ventas totales por método
+const metodoSuma = {};
+report.sessions.forEach(s => {
+  const ventas = s.salesByMethod || {};
+  Object.keys(ventas).forEach(m => {
+    if (m !== "total") {
+      metodoSuma[m] = (metodoSuma[m] || 0) + Number(ventas[m] || 0);
+    }
+  });
+});
+const totalMetodos = Object.values(metodoSuma).reduce((a, b) => a + b, 0);
+const metodosTexto = `${totalMetodos.toFixed(2)}`;
+
+autoTable(doc, {
+  startY: doc.lastAutoTable.finalY + 5,
+  head: [["Totales", "Apertura", "Ingresos", "Ventas (por método)", "Egresos", "Total"]],
+  body: [[
+    "",
+    `$${totalApertura.toFixed(2)}`,
+    `$${totalIngresos.toFixed(2)}`,
+    metodosTexto,
+    `$${totalEgresos.toFixed(2)}`,
+    `$${totalGeneral.toFixed(2)}`
+  ]],
+  styles: { fontSize: 9, cellPadding: 3, valign: "top" },
+  headStyles: { fillColor: [46, 204, 113], textColor: 255 },
+});
+
+doc.setFontSize(9);
+doc.text(" Los egresos incluyen notas de crédito emitidas en el período.", 14, doc.lastAutoTable.finalY + 8);
+// 🟢 Descargar automáticamente
+doc.save(`Resumen_Caja_${getCurrentARDate()}.pdf`);
+  } catch (err) {
+    console.error("Error al exportar PDF:", err);
+    alert("Error al exportar PDF. Revisa la consola.");
+  }
+};
+
+const handleExportExcel = async () => {
+  try {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Resumen Caja");
+
+    // Título
+    worksheet.mergeCells("A1:F1");
+    worksheet.getCell("A1").value = "Resumen de Caja - Tienda Natural";
+    worksheet.getCell("A1").font = { bold: true, size: 14 };
+    worksheet.getCell("A1").alignment = { horizontal: "center" };
+
+    const fechaReporte = getCurrentARTimestamp();
+    const fechaCaja = session?.date || getCurrentARDate();
+    const estadoCaja = session?.closed ? "CERRADA" : "ABIERTA";
+
+    worksheet.mergeCells("A2:F2");
+    worksheet.getCell("A2").value = `Generado: ${fechaReporte} | Caja del ${fechaCaja} | Estado: ${estadoCaja}`;
+    worksheet.getCell("A2").alignment = { horizontal: "center" };
+
+    // Encabezados
+    worksheet.addRow(["Fecha", "Apertura", "Ingresos", "Ventas", "Egresos", "Total"]);
+    worksheet.getRow(3).font = { bold: true };
+
+    // Filas
+    report.sessions.forEach((r) => {
+    const ventas = r.salesByMethod || {};
+    const metodos = Object.keys(ventas)
+      .filter((k) => k !== "total")
+      .map((m) => `${m}: $${ventas[m].toFixed(2)}`)
+      .join("\n");
+
+    // 🟢 Detallar ingresos/egresos
+    const ingresosDetallados = report.movements
+      ?.filter(m => m.date === r.date && m.type === "ingreso")
+      .map(m => `• ${m.concept}: $${Number(m.amount).toFixed(2)}`)
+      .join("\n") || "—";
+
+   
+  // 🟢 Egresos = egresos manuales (movements) + notas de crédito (sales) del mismo día
+
+    const egresosMovs = (report.movements || [])
+      .filter(m => m.date === r.date && m.type === "egreso");
+
+    const manualExpenseTotal = egresosMovs
+      .reduce((acc, m) => acc + Number(m.amount || 0), 0);
+
+    const refundsOfDay = (report.sales || [])
+      .filter(s => s.type === "nota_credito" && (s.date || "").slice(0,10) === r.date);
+
+    const refundsTotal = refundsOfDay
+      .reduce((acc, s) => acc + Math.abs(Number(s.amount ?? s.total ?? 0)), 0);
+
+    const egresosDetallados = [
+      `Egresos manuales: $${manualExpenseTotal.toFixed(2)}`,
+      `Notas de crédito: $${refundsTotal.toFixed(2)}`,
+      `Total egresos del día: $${(manualExpenseTotal + refundsTotal).toFixed(2)}`
+    ].join("\n");
+
+
+    const row = worksheet.addRow([
+      r.date,
+      Number(r.opening).toFixed(2),
+      ingresosDetallados,
+      metodos || "—",
+      egresosDetallados,
+      Number(r.total).toFixed(2),
+    ]);
+
+  // 🟢 permitir saltos de línea dentro de las celdas
+  row.eachCell((cell) => {
+    cell.alignment = { wrapText: true, vertical: "top" };
+  });
+});
+
+
+
+    worksheet.columns.forEach((col) => (col.width = 20));
+
+// 🧾 Totales con ventas por método
+const totalApertura = report.sessions.reduce((a, r) => a + Number(r.opening || 0), 0);
+const totalIngresos = report.sessions.reduce((a, r) => a + Number(r.income || 0), 0);
+const totalEgresos = report.sessions.reduce((a, r) => a + Number(r.expense || 0), 0);
+const totalGeneral = report.sessions.reduce((a, r) => a + Number(r.total || 0), 0);
+
+// 🔹 Calcular ventas totales por método
+const metodoSuma = {};
+report.sessions.forEach(s => {
+  const ventas = s.salesByMethod || {};
+  Object.keys(ventas).forEach(m => {
+    if (m !== "total") {
+      metodoSuma[m] = (metodoSuma[m] || 0) + Number(ventas[m] || 0);
+    }
+  });
+});
+const totalMetodos = Object.values(metodoSuma).reduce((a, b) => a + b, 0);
+const metodosTexto = `${totalMetodos.toFixed(2)}`;
+
+// 🧾 Agregar fila final
+const footerRow = worksheet.addRow([
+  "Totales",
+  totalApertura.toFixed(2),
+  totalIngresos.toFixed(2),
+  metodosTexto,
+  totalEgresos.toFixed(2),
+  totalGeneral.toFixed(2)
+]);
+footerRow.font = { bold: true };
+footerRow.eachCell((cell) => {
+  cell.alignment = { wrapText: true, horizontal: "center", vertical: "top" };
+  cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD6F5D6" } };
+});
+
+// Comentario aclaratorio
+const infoRow = worksheet.addRow(["Los egresos incluyen las notas de crédito del período."]);
+infoRow.font = { italic: true, color: { argb: "FF555555" } };
+// 🟢 Generar y descargar archivo Excel
+const buffer = await workbook.xlsx.writeBuffer();
+saveAs(new Blob([buffer]), `Resumen_Caja_${getCurrentARDate()}.xlsx`);
+
+
+  } catch (err) {
+    console.error("Error al exportar Excel:", err);
+    alert("Error al exportar Excel. Revisa la consola.");
+  }
+};
+const handlePreview = () => {
+  if (!report?.sessions || report.sessions.length === 0) {
+    alert("No hay datos para previsualizar.");
+    return;
+  }
+  setPreviewData(report.sessions);
+  setShowPreview(true);
+};
+
+
+// ==========================================================
+// 🔥 Renderizado del componente
+// ==========================================================
+
   useEffect(() => {
   const init = async () => {
     try {
@@ -199,7 +479,9 @@ const Caja = () => {
     }
   };
   init();
-}, [period, selectedDate]); // si aún NO agregaste selectedDate, dejalo solo con [period]
+}, []); // si aún NO agregaste selectedDate, dejalo solo con [period]
+
+
 
 // 🧮 Construye filas a mostrar: Aperturas (por sesión) + Movimientos
 const displayRows = React.useMemo(() => {
@@ -255,6 +537,7 @@ rows.sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }, [report]);
 // 🔒 Bloquear funciones si hay pendiente y caja abierta
 const lock = pending && session && !session.closed;
+
 
   return (
     <div className="container mt-4">
@@ -327,50 +610,73 @@ const lock = pending && session && !session.closed;
           </Col>
         </Row>
       </Form>
-        <div className="mb-3 ">
-          <Form.Label>Período:</Form.Label>
+        {/* 🔹 Barra de filtros y exportación */}
+<div className="d-flex justify-content-between align-items-center mb-3 flex-wrap">
 
-          {/* Selector de período */}
-          <Form.Select
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-            style={{ width: "220px", display: "inline-block", marginLeft: "10px", marginRight: "10px" }}
-            // ❌ NO bloquear el selector aunque haya pendiente; solo bloqueamos "Generar" y exportaciones
-            // disabled={lock}
-          >
-            {/* "Hoy" muestra SIEMPRE la fecha real de hoy */}
-            <option value="today">Hoy ({new Date().toISOString().slice(0, 10)})</option>
-            <option value="custom">Fecha específica…</option>
-            <option value="week">Semana</option>
-            <option value="month">Mes</option>
-            <option value="year">Año</option>
-          </Form.Select>
+  {/* 🔸 Lado izquierdo: selección de período y Generar */}
+  <div className="d-flex align-items-center flex-wrap">
+    <Form.Label className="mb-0 me-2">Periodo:</Form.Label>
 
-          {/* Si el usuario elige "custom", mostramos el input de fecha EDITABLE */}
-          {period === "custom" && (
-            <Form.Control
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              style={{ width: "180px", display: "inline-block", marginRight: "10px" }}
-              // ❌ NO bloquear la edición de fecha
-              // disabled={lock}
-            />
-          )}
+    <Form.Select
+      value={period}
+      onChange={(e) => setPeriod(e.target.value)}
+      style={{ width: "200px", marginRight: "10px" }}
+    >
+      <option value="today">Hoy ({getCurrentARDate()})</option>
+      <option value="custom">Fecha específica…</option>
+      <option value="week">Semana</option>
+      <option value="month">Mes</option>
+      <option value="year">Año</option>
+    </Form.Select>
 
-          <Button
-            variant="success"
-            onClick={fetchReport}
-            disabled={lock || loading} // ✅ Bloqueamos solo la acción de generar si hay pendiente
-          >
-            {loading ? "Generando..." : "Generar"}
-          </Button>
-        </div>
+    {period === "custom" && (
+      <Form.Control
+        type="date"
+        value={selectedDate}
+        onChange={(e) => setSelectedDate(e.target.value)}
+        style={{ width: "180px", marginRight: "10px" }}
+      />
+    )}
 
-      <div className="d-flex gap-2 mb-2">
-        <Button onClick={() => handleExport("csv")} disabled={lock}>Exportar CSV</Button>
-        <Button onClick={() => handleExport("pdf")} variant="secondary" disabled={lock}>Exportar PDF</Button>
-      </div>
+    <Button
+      variant="success"
+      onClick={fetchReport}
+      disabled={lock || loading}
+      style={{ backgroundColor: "#28a745", borderColor: "#28a745" }}
+    >
+      {loading ? "Generando..." : "Generar"}
+    </Button>
+  </div>
+
+  {/* 🔸 Lado derecho: exportaciones */}
+  <div className="d-flex gap-2 mt-2 mt-md-0">
+    <Button
+      onClick={handlePreview}
+      disabled={lock}
+      style={{
+        backgroundColor: "#2ecc71",
+        borderColor: "#27ae60",
+        color: "white",
+      }}
+    >
+      📊 Exportar Excel
+    </Button>
+
+    <Button
+      onClick={() => setShowPDFPreview(true)}
+      disabled={lock}
+      style={{
+        backgroundColor: "#1e7e34",
+        borderColor: "#145a24",
+        color: "white",
+      }}
+    >
+      🧾 Exportar PDF
+    </Button>
+
+  </div>
+</div>
+
       <h4>📊 Resumen de sesiones</h4>
       <Table striped bordered hover>
         <thead>
@@ -378,25 +684,43 @@ const lock = pending && session && !session.closed;
             <th>Fecha</th>
             <th>Apertura</th>
             <th>Ingresos</th>
-            <th>Ventas</th>
+            <th colSpan="1" className="text-center">Ventas (por método)</th>
             <th>Egresos</th>
-            <th>Cierre</th>
+            
             <th>Total</th>
           </tr>
         </thead>
+
         <tbody>
           {report.sessions && report.sessions.length > 0 ? (
-            report.sessions.map((r, i) => (
-              <tr key={i}>
-                <td>{r.date}</td>
-                <td>${Number(r.opening).toFixed(2)}</td>
-                <td>${Number(r.income).toFixed(2)}</td>
-                <td className="text-success">${Number(r.salesTotal || 0).toFixed(2)}</td>
-                <td className="text-danger">${Number(r.expense).toFixed(2)}</td>
-                <td>${Number(r.closing).toFixed(2)}</td>
-                <td className="fw-bold">${Number(r.total || 0).toFixed(2)}</td>
-              </tr>
-            ))
+            report.sessions.map((r, i) => {
+              const ventas = r.salesByMethod || {};
+              const metodos = Object.keys(ventas).filter(k => k !== 'total');
+              return (
+                <tr key={i}>
+                  <td>{r.date}</td>
+                  <td>${Number(r.opening).toFixed(2)}</td>
+                  <td>${Number(r.income).toFixed(2)}</td>
+                  <td>
+                    <div style={{ lineHeight: "1.3" }}>
+                      {metodos.length > 0 ? (
+                        metodos.map((m, idx) => (
+                          <div key={idx}>
+                            <strong>{m}:</strong> ${ventas[m].toFixed(2)}
+                          </div>
+                        ))
+                      ) : (
+                        <span>—</span>
+                      )}
+                      
+                    </div>
+                  </td>
+                  <td className="text-danger">${Number(r.expense).toFixed(2)}</td>
+                  
+                  <td className="fw-bold">${Number(r.total || 0).toFixed(2)}</td>
+                </tr>
+              );
+            })
           ) : (
             <tr>
               <td colSpan={7} className="text-center">
@@ -405,6 +729,45 @@ const lock = pending && session && !session.closed;
             </tr>
           )}
         </tbody>
+        <tfoot>
+  <tr className="table-success fw-bold text-center">
+    <td>Totales</td>
+    <td>
+      ${report.sessions.reduce((a, r) => a + Number(r.opening || 0), 0).toFixed(2)}
+    </td>
+    <td>
+      ${report.sessions.reduce((a, r) => a + Number(r.income || 0), 0).toFixed(2)}
+    </td>
+
+    {/* 🧩 Ventas: totales por método en el footer */}
+    <td>
+  <div style={{ lineHeight: "1.3" }}>
+    {(() => {
+      const metodoSuma = {};
+      report.sessions.forEach(s => {
+        const ventas = s.salesByMethod || {};
+        Object.keys(ventas).forEach(m => {
+          if (m !== "total") {
+            metodoSuma[m] = (metodoSuma[m] || 0) + Number(ventas[m] || 0);
+          }
+        });
+      });
+      const totalMetodos = Object.values(metodoSuma).reduce((a, b) => a + b, 0);
+      return <span className="fw-bold text-success">Total ventas: ${totalMetodos.toFixed(2)}</span>;
+    })()}
+  </div>
+</td>
+
+
+    <td className="text-danger">
+      ${report.sessions.reduce((a, r) => a + Number(r.expense || 0), 0).toFixed(2)}
+    </td>
+    <td>
+      ${report.sessions.reduce((a, r) => a + Number(r.total || 0), 0).toFixed(2)}
+    </td>
+  </tr>
+</tfoot>
+
       </Table>
 
       {/* 🟢 MODAL: Apertura */}
@@ -564,6 +927,179 @@ const lock = pending && session && !session.closed;
 </tbody>
 
 </Table>
+<Modal show={showPreview} onHide={() => setShowPreview(false)} size="lg">
+  <Modal.Header closeButton>
+    <Modal.Title>Vista previa del Resumen de Caja</Modal.Title>
+  </Modal.Header>
+  <Modal.Body>
+    <Table striped bordered hover size="sm">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Apertura</th>
+          <th>Ingresos</th>
+          <th>Ventas</th>
+          <th>Egresos</th>
+          <th>Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {previewData.map((r, i) => {
+          const ventas = r.salesByMethod || {};
+          const metodos = Object.keys(ventas)
+            .filter((k) => k !== "total")
+            .map((m) => `${m}: $${ventas[m].toFixed(2)}`)
+            .join(", ");
+          return (
+            <tr key={i}>
+              <td>{r.date}</td>
+              <td>${Number(r.opening).toFixed(2)}</td>
+              <td>${Number(r.income).toFixed(2)}</td>
+              <td>
+  <div style={{ lineHeight: "1.3" }}>
+    {(() => {
+      const metodoSuma = {};
+      report.sessions.forEach(s => {
+        const ventas = s.salesByMethod || {};
+        Object.keys(ventas).forEach(m => {
+          if (m !== "total") {
+            metodoSuma[m] = (metodoSuma[m] || 0) + Number(ventas[m] || 0);
+          }
+        });
+      });
+      const totalMetodos = Object.values(metodoSuma).reduce((a, b) => a + b, 0);
+      return <span className="fw-bold text-success">Total ventas: ${totalMetodos.toFixed(2)}</span>;
+    })()}
+  </div>
+</td>
+
+              <td>${Number(r.expense).toFixed(2)}</td>
+              <td>${Number(r.total || 0).toFixed(2)}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </Table>
+  </Modal.Body>
+  <Modal.Footer>
+    <Button
+    variant="success"
+    onClick={async () => {
+      await handleExportExcel();
+      setShowPreview(false);
+    }}
+  >
+    Confirmar exportación Excel
+  </Button>
+
+    <Button variant="secondary" onClick={() => setShowPreview(false)}>
+      Cerrar
+    </Button>
+  </Modal.Footer>
+</Modal>
+{/* 🧾 Modal de previsualización PDF */}
+<Modal
+  show={showPDFPreview}
+  onHide={() => setShowPDFPreview(false)}
+  size="lg"
+>
+  <Modal.Header closeButton>
+    <Modal.Title>Vista previa del PDF - Resumen de Caja</Modal.Title>
+  </Modal.Header>
+  <Modal.Body>
+    <Table striped bordered hover size="sm">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Apertura</th>
+          <th>Ingresos</th>
+          <th>Ventas</th>
+          <th>Egresos</th>
+          <th>Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {report.sessions.map((r, i) => {
+          const ventas = r.salesByMethod || {};
+          const metodos = Object.keys(ventas)
+            .filter((k) => k !== "total")
+            .map((m) => `${m}: $${ventas[m].toFixed(2)}`)
+            .join("\n");
+
+          const ingresosDetallados = report.movements
+            ?.filter((m) => m.date === r.date && m.type === "ingreso")
+            .map((m) => `• ${m.concept}: $${Number(m.amount).toFixed(2)}`)
+            .join("\n") || "—";
+
+          // 🟢 Egresos = egresos manuales (movements) + notas de crédito (sales) del mismo día
+          const egresosMovs = (report.movements || [])
+            .filter((m) => m.date === r.date && m.type === "egreso");
+
+          const manualExpenseTotal = egresosMovs
+            .reduce((acc, m) => acc + Number(m.amount || 0), 0);
+
+          const refundsOfDay = (report.sales || [])
+            .filter((s) => s.type === "nota_credito" && (s.date || "").slice(0,10) === r.date);
+
+          const refundsTotal = refundsOfDay
+            .reduce((acc, s) => acc + Math.abs(Number(s.amount ?? s.total ?? 0)), 0);
+
+          const egresosDetallados = [
+            `Egresos manuales: $${manualExpenseTotal.toFixed(2)}`,
+            `Notas de crédito: $${refundsTotal.toFixed(2)}`,
+            `Total egresos del día: $${(manualExpenseTotal + refundsTotal).toFixed(2)}`
+          ].join("\n");
+
+          return (
+            <tr key={i}>
+              <td>{r.date}</td>
+              <td>${Number(r.opening).toFixed(2)}</td>
+              <td style={{ whiteSpace: "pre-line" }}>{ingresosDetallados}</td>
+              <td style={{ whiteSpace: "pre-line" }}>{metodos || "—"}</td>
+              <td style={{ whiteSpace: "pre-line" }}>{egresosDetallados}</td>
+              <td>${Number(r.total).toFixed(2)}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+      <tfoot>
+  <tr className="table-success fw-bold">
+    <td>Total general</td>
+    <td>
+      ${report.sessions.reduce((acc, r) => acc + Number(r.opening || 0), 0).toFixed(2)}
+    </td>
+    <td>
+      ${report.sessions.reduce((acc, r) => acc + Number(r.income || 0), 0).toFixed(2)}
+    </td>
+    <td>—</td>
+    <td className="text-danger">
+      ${report.sessions.reduce((acc, r) => acc + Number(r.expense || 0), 0).toFixed(2)}
+    </td>
+    <td>
+      ${report.sessions.reduce((acc, r) => acc + Number(r.total || 0), 0).toFixed(2)}
+    </td>
+  </tr>
+</tfoot>
+
+    </Table>
+  </Modal.Body>
+  <Modal.Footer>
+    <Button
+      variant="success"
+      onClick={async () => {
+        await handleExportPDF();
+        setShowPDFPreview(false);
+     }}
+    >
+      Confirmar exportación PDF
+    </Button>
+
+    <Button variant="secondary" onClick={() => setShowPDFPreview(false)}>
+      Cancelar
+    </Button>
+  </Modal.Footer>
+</Modal>
+
 
     
 </div>

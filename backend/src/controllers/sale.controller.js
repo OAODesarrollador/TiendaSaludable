@@ -1,32 +1,12 @@
 // ============================================
-// SALE CONTROLLER (versión final con refunds anidados)
+// SALE CONTROLLER (versión corregida con timezone fix)
 // ============================================
+
 const { db, runAsync, getAsync, allAsync } = require('../config/database');
 const PDFDocument = require('pdfkit');
 
-// ============================================
-// MIGRACIÓN AUTOMÁTICA DE TABLA SALE_ITEMS
-// ============================================
-const ensureSaleItemsColumns = async () => {
-  try {
-    const columns = await allAsync(`PRAGMA table_info(sale_items)`);
-    const columnNames = columns.map(c => c.name);
+const { formatFechaHoraAR, getCurrentARTimestamp } = require('../config/timezoneB');
 
-    if (!columnNames.includes('discount')) {
-      await runAsync(`ALTER TABLE sale_items ADD COLUMN discount REAL DEFAULT 0`);
-      console.log('🛠️ Columna "discount" agregada a sale_items');
-    }
-
-    if (!columnNames.includes('discount_type')) {
-      await runAsync(`ALTER TABLE sale_items ADD COLUMN discount_type TEXT DEFAULT 'percentage'`);
-      console.log('🛠️ Columna "discount_type" agregada a sale_items');
-    }
-  } catch (error) {
-    console.error('❌ Error al verificar o actualizar la estructura de sale_items:', error);
-  }
-};
-
-ensureSaleItemsColumns();
 
 // ============================================
 // CREAR NUEVA VENTA
@@ -101,10 +81,11 @@ const createSale = async (req, res) => {
       const totalNoTax = subtotal / (1 + taxRate);
       const tax = subtotal - totalNoTax;
       const total = totalNoTax + tax;
-
+      const createdAt = getCurrentARTimestamp();
+      console.log('🕒 Guardando venta con fecha:', createdAt);  
       const saleResult = await runAsync(
-        'INSERT INTO sales (user_id, subtotal, tax, total, payment_method) VALUES (?, ?, ?, ?, ?)',
-        [userId, totalNoTax, tax, total, payment_method]
+        'INSERT INTO sales (user_id, subtotal, tax, total, payment_method, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [userId, totalNoTax, tax, total, payment_method, createdAt]
       );
 
       const saleId = saleResult.id;
@@ -131,6 +112,7 @@ const createSale = async (req, res) => {
       const sale = await getAsync('SELECT * FROM sales WHERE id = ?', [saleId]);
       const saleItemsFromDb = await allAsync('SELECT * FROM sale_items WHERE sale_id = ?', [saleId]);
 
+      // ✅ NO convertir a ISO - dejar fecha como viene de SQLite
       res.status(201).json({
         message: 'Venta procesada exitosamente',
         sale: { ...sale, items: saleItemsFromDb }
@@ -145,14 +127,14 @@ const createSale = async (req, res) => {
     res.status(500).json({ error: 'Error al procesar la venta' });
   }
 };
+
 // ============================================
-// OBTENER TODAS LAS VENTAS Y NOTAS DE CRÉDITO (UNIFICADAS EN UNA SOLA LISTA)
+// OBTENER TODAS LAS VENTAS Y NOTAS DE CRÉDITO
 // ============================================
 const getAllSales = async (req, res) => {
   try {
     const { start_date, end_date, limit = 100, offset = 0 } = req.query;
 
-    // 🔹 Traer todas las ventas
     const sales = await allAsync(
       `
       SELECT 
@@ -173,36 +155,31 @@ const getAllSales = async (req, res) => {
       [start_date || '1900-01-01', end_date || '2100-12-31', parseInt(limit), parseInt(offset)]
     );
 
+    const refunds = await allAsync(
+      `
+      SELECT 
+        r.id,
+        r.sale_id,
+        r.created_at,
+        u.full_name AS seller_name,
+        (r.subtotal * -1) AS subtotal,
+        (r.tax * -1) AS tax,
+        (r.total * -1) AS total,
+        'Nota de Crédito' AS payment_method,
+        'Nota de Crédito' AS type
+      FROM refunds r
+      LEFT JOIN sales s ON r.sale_id = s.id
+      LEFT JOIN users u ON s.user_id = u.id
+      WHERE DATE(r.created_at) BETWEEN DATE(?) AND DATE(?)
+      ORDER BY r.created_at DESC
+      `,
+      [start_date || '1900-01-01', end_date || '2100-12-31']
+    );
 
-    // 🔹 Traer todas las notas de crédito (agregamos sale_id original)
-      const refunds = await allAsync(
-        `
-        SELECT 
-          r.id,
-          r.sale_id,                             -- 🆕 Ticket original
-          r.created_at,
-          u.full_name AS seller_name,
-          (r.subtotal * -1) AS subtotal,
-          (r.tax * -1) AS tax,
-          (r.total * -1) AS total,
-          'Nota de Crédito' AS payment_method,
-          'Nota de Crédito' AS type
-        FROM refunds r
-        LEFT JOIN sales s ON r.sale_id = s.id
-        LEFT JOIN users u ON s.user_id = u.id
-        WHERE DATE(r.created_at) BETWEEN DATE(?) AND DATE(?)
-        ORDER BY r.created_at DESC
-        `,
-        [start_date || '1900-01-01', end_date || '2100-12-31']
-      );
-
-
-    // 🔹 Unir ventas + notas de crédito
     const combined = [...sales, ...refunds].sort(
       (a, b) => new Date(b.created_at) - new Date(a.created_at)
     );
 
-    // 🔹 Agregar items a cada registro (opcional)
     for (const record of combined) {
       if (record.type === 'Venta') {
         record.items = await allAsync('SELECT * FROM sale_items WHERE sale_id = ?', [record.id]);
@@ -214,13 +191,13 @@ const getAllSales = async (req, res) => {
       }
     }
 
+    // ✅ NO convertir a ISO - dejar fechas como vienen de SQLite
     res.json(combined);
   } catch (error) {
     console.error('Error obteniendo ventas y notas de crédito unificadas:', error);
     res.status(500).json({ error: 'Error al obtener ventas y notas de crédito' });
   }
 };
-
 
 // ============================================
 // OBTENER VENTA POR ID
@@ -251,6 +228,7 @@ const getSaleById = async (req, res) => {
     }
     sale.refunds = refunds;
 
+    // ✅ NO convertir a ISO
     res.json(sale);
   } catch (error) {
     console.error('Error obteniendo venta:', error);
@@ -261,18 +239,19 @@ const getSaleById = async (req, res) => {
 // ============================================
 // CREAR NOTA DE CRÉDITO / DEVOLUCIÓN
 // ============================================
+// ============================================
+// CREAR NOTA DE CRÉDITO / DEVOLUCIÓN (versión corregida con egreso en caja)
+// ============================================
 const createRefund = async (req, res) => {
   try {
     const { id: sale_id } = req.params;
     const { reason, items } = req.body;
 
-    // 🧩 1️⃣ Verificar que exista la venta original
     const sale = await getAsync('SELECT * FROM sales WHERE id = ?', [sale_id]);
     if (!sale) {
       return res.status(404).json({ error: 'Venta no encontrada.' });
     }
 
-    // 🧩 2️⃣ Control contable: evitar notas duplicadas
     const existingRefund = await getAsync(
       'SELECT id FROM refunds WHERE sale_id = ? LIMIT 1',
       [sale_id]
@@ -282,12 +261,10 @@ const createRefund = async (req, res) => {
         error: `Esta venta ya tiene una Nota de Crédito registrada (ID: ${existingRefund.id}).`
       });
     }
+
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'No hay productos para devolver' });
     }
-
-    
-
 
     await runAsync('BEGIN TRANSACTION');
     try {
@@ -312,13 +289,10 @@ const createRefund = async (req, res) => {
           });
         }
 
-        // ✅ PRECIO EFECTIVO COBRADO POR UNIDAD (ya incluye descuento)
-        //    Tomamos el subtotal del ítem original (neto) y lo prorrateamos por cantidad.
         const effectiveUnitNet = saleItem.quantity > 0
           ? Number((saleItem.subtotal / saleItem.quantity).toFixed(2))
           : 0;
 
-        // ✅ Subtotal del ítem a devolver usando el precio neto (con descuento)
         const itemSubtotal = Number((effectiveUnitNet * item.quantity).toFixed(2));
         subtotal = Number((subtotal + itemSubtotal).toFixed(2));
 
@@ -326,33 +300,33 @@ const createRefund = async (req, res) => {
           product_id: saleItem.product_id,
           product_name: saleItem.product_name,
           quantity: item.quantity,
-          // Guardamos el unit_price de la devolución como el neto efectivo
-          // para que el detalle refleje el valor realmente devuelto.
           unit_price: effectiveUnitNet,
           subtotal: itemSubtotal
         });
 
-        // Reponer stock
+        // 🔹 Reponer stock
         await runAsync('UPDATE products SET stock = stock + ? WHERE id = ?', [
           item.quantity,
           saleItem.product_id
         ]);
       }
 
-      // ✅ Descomponer IVA del total neto (subtotal incluye IVA)
       const taxRate = parseFloat(process.env.IVA_RATE || 21) / 100;
       const total = subtotal;
       const subtotalNoTax = Number((total / (1 + taxRate)).toFixed(2));
       const tax = Number((total - subtotalNoTax).toFixed(2));
+      const createdAt = getCurrentARTimestamp();
 
+      // 🧾 Crear registro principal de nota de crédito
       const refundResult = await runAsync(
-        `INSERT INTO refunds (sale_id, reason, subtotal, tax, total)
-         VALUES (?, ?, ?, ?, ?)`,
-        [sale_id, reason || null, subtotalNoTax, tax, total]
+        `INSERT INTO refunds (sale_id, reason, subtotal, tax, total, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [sale_id, reason || null, subtotalNoTax, tax, total, createdAt]
       );
 
       const refundId = refundResult.id;
 
+      // 🧾 Insertar los ítems devueltos
       for (const item of refundItems) {
         await runAsync(
           `INSERT INTO refund_items (refund_id, product_id, product_name, quantity, unit_price, subtotal)
@@ -361,20 +335,35 @@ const createRefund = async (req, res) => {
         );
       }
 
+      // ✅ Registrar automáticamente el egreso en caja
+      try {
+        const { recordRefundExpense } = require('./cash.controller');
+        await recordRefundExpense({
+          total,
+          sale_id,
+          refund_id: refundId,
+          user_id: req.user?.id || null
+        });
+      } catch (err) {
+        console.warn("⚠️ No se pudo registrar el egreso en caja:", err.message);
+      }
+
       await runAsync('COMMIT');
 
       const refund = await getAsync('SELECT * FROM refunds WHERE id = ?', [refundId]);
       refund.items = await allAsync('SELECT * FROM refund_items WHERE refund_id = ?', [refundId]);
 
       res.status(201).json({
-        message: 'Nota de crédito creada exitosamente',
+        message: 'Nota de crédito creada exitosamente y registrada en caja',
         refund
       });
+
     } catch (error) {
       await runAsync('ROLLBACK');
       console.error('Error en devolución:', error);
       throw error;
     }
+
   } catch (error) {
     console.error('Error creando nota de crédito:', error);
     res.status(500).json({ error: 'Error al crear la nota de crédito' });
@@ -391,20 +380,22 @@ const getRefundsBySale = async (req, res) => {
     for (const refund of refunds) {
       refund.items = await allAsync('SELECT * FROM refund_items WHERE refund_id = ?', [refund.id]);
     }
+
+    // ✅ NO convertir a ISO
     res.json(refunds);
   } catch (error) {
     console.error('Error obteniendo devoluciones:', error);
     res.status(500).json({ error: 'Error al obtener devoluciones' });
   }
 };
+
 // ============================================
-// VERIFICAR SI UNA VENTA YA TIENE NOTA DE CRÉDITO (versión robusta)
+// VERIFICAR SI UNA VENTA YA TIENE NOTA DE CRÉDITO
 // ============================================
 const checkRefundExists = async (req, res) => {
   try {
-    const { id } = req.params; // sale_id
+    const { id } = req.params;
 
-    // Usamos COUNT para evitar truthy de {} y garantizar booleans
     const row = await getAsync(
       'SELECT COUNT(*) AS total FROM refunds WHERE sale_id = ?',
       [id]
@@ -430,7 +421,6 @@ const checkRefundExists = async (req, res) => {
   }
 };
 
-
 // ============================================
 // OBTENER DETALLE DE UNA NOTA DE CRÉDITO POR ID
 // ============================================
@@ -441,6 +431,8 @@ const getRefundById = async (req, res) => {
     if (!refund) return res.status(404).json({ error: 'Nota de crédito no encontrada' });
 
     refund.items = await allAsync('SELECT * FROM refund_items WHERE refund_id = ?', [refundId]);
+
+    // ✅ NO convertir a ISO
     res.json(refund);
   } catch (error) {
     console.error('Error obteniendo nota de crédito:', error);
@@ -476,18 +468,7 @@ const generateTicketPDF = async (req, res) => {
     doc.moveDown(0.5);
 
     doc.fontSize(9).text(`Ticket #${sale.id}`);
-
-    // CORRECCIÓN ZONA HORARIA ARGENTINA (GMT-3)
-    
-    const fmtAR = new Intl.DateTimeFormat('es-AR', {
-      dateStyle: 'short',
-      timeStyle: 'medium',
-      timeZone: 'America/Argentina/Buenos_Aires'
-    });
-
-    doc.fontSize(9).text(`Ticket #${sale.id}`);
-    doc.fontSize(8).text(`Fecha: ${fmtAR.format(new Date(sale.created_at))}`);
-
+    doc.fontSize(8).text(`Fecha: ${formatFechaHoraAR(sale.created_at)}`);
     doc.text(`Vendedor: ${sale.seller_name}`);
     doc.text(`Pago: ${sale.payment_method.toUpperCase()}`);
     doc.moveDown(0.5);
@@ -522,12 +503,13 @@ const generateTicketPDF = async (req, res) => {
     res.status(500).json({ error: 'Error al generar ticket PDF' });
   }
 };
+
 // ============================================
 // GENERAR PDF DE NOTA DE CRÉDITO
 // ============================================
 const generateRefundPDF = async (req, res) => {
   try {
-    const { id } = req.params; // refund_id
+    const { id } = req.params;
     const refund = await getAsync(`
       SELECT r.*, s.id AS sale_ticket, u.full_name AS seller_name
       FROM refunds r
@@ -548,7 +530,6 @@ const generateRefundPDF = async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename=nota_credito_${id}.pdf`);
     doc.pipe(res);
 
-    // Encabezado
     doc.fontSize(16).fillColor('red').text('🧾 NOTA DE CRÉDITO', { align: 'center' });
     doc.fillColor('black').fontSize(10).text('Tienda Natural', { align: 'center' });
     doc.text('Productos Naturales y Dietéticos', { align: 'center' });
@@ -556,24 +537,14 @@ const generateRefundPDF = async (req, res) => {
     doc.fontSize(8).text('─'.repeat(38), { align: 'center' });
     doc.moveDown(0.5);
 
-    // Info general
-    // CORRECCIÓN ZONA HORARIA ARGENTINA (GMT-3)
-    const fmtAR = new Intl.DateTimeFormat('es-AR', {
-      dateStyle: 'short',
-      timeStyle: 'medium',
-      timeZone: 'America/Argentina/Buenos_Aires'
-    });
-
     doc.fontSize(9).text(`Nota #${refund.id}`);
-    doc.fontSize(8).text(`Fecha: ${fmtAR.format(new Date(refund.created_at))}`);
-
+    doc.fontSize(8).text(`Fecha: ${formatFechaHoraAR(refund.created_at)}`);
     doc.text(`Vendedor: ${refund.seller_name}`);
     doc.text(`Ticket original: #${refund.sale_ticket}`);
     doc.moveDown(0.5);
     doc.text('─'.repeat(38), { align: 'center' });
     doc.moveDown(0.5);
 
-    // Items
     doc.fontSize(8);
     items.forEach(it => {
       doc.text(it.product_name);
@@ -586,13 +557,11 @@ const generateRefundPDF = async (req, res) => {
     doc.text('─'.repeat(38), { align: 'center' });
     doc.moveDown(0.5);
 
-    // Totales
     doc.fontSize(9);
     doc.text(`Subtotal: $${refund.subtotal.toFixed(2)}`, { align: 'right' });
     doc.text(`IVA (${process.env.IVA_RATE || 21}%): $${refund.tax.toFixed(2)}`, { align: 'right' });
     doc.fontSize(11).text(`TOTAL: $${refund.total.toFixed(2)}`, { align: 'right' });
 
-    // Pie
     doc.moveDown(1);
     doc.fontSize(8).text('Documento generado automáticamente', { align: 'center' });
     doc.text('Referencia contable - No válida como factura', { align: 'center' });
@@ -603,7 +572,6 @@ const generateRefundPDF = async (req, res) => {
     res.status(500).json({ error: 'Error al generar PDF de nota de crédito' });
   }
 };
-
 
 // ============================================
 // EXPORTS

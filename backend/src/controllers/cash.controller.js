@@ -8,8 +8,8 @@ const { Parser } = require('json2csv');
 
 const db = require("../config/database");
 
-
-
+const { getCurrentARTimestamp, getCurrentARDate } = require('../config/timezoneB');
+const fechaAR = getCurrentARTimestamp();
 
 // --------------------------------------------
 // Helpers
@@ -39,33 +39,33 @@ const toLatinoDate = (d) => {
 // --------------------------------------------
 async function ensureCashTables() {
   await runAsync('PRAGMA foreign_keys = ON');
-  await runAsync(`
-    CREATE TABLE IF NOT EXISTS cash_sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      date DATE UNIQUE NOT NULL,
-      opening_amount REAL NOT NULL,
-      closing_amount REAL,
-      total_income REAL DEFAULT 0,
-      total_expense REAL DEFAULT 0,
-      carried_balance REAL DEFAULT 0,
-      closed INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-  await runAsync(`
-    CREATE TABLE IF NOT EXISTS cash_movements (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id INTEGER NOT NULL,
-      type TEXT CHECK(type IN ('ingreso','egreso')) NOT NULL,
-      concept TEXT NOT NULL,
-      amount REAL NOT NULL,
-      payment_method TEXT,
-      user_id INTEGER,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (session_id) REFERENCES cash_sessions(id),
-      FOREIGN KEY (user_id) REFERENCES users(id)
-    )
-  `);
+await runAsync(`
+  CREATE TABLE IF NOT EXISTS cash_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date DATE UNIQUE NOT NULL,
+    opening_amount REAL NOT NULL,
+    closing_amount REAL,
+    total_income REAL DEFAULT 0,
+    total_expense REAL DEFAULT 0,
+    carried_balance REAL DEFAULT 0,
+    closed INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL
+  )
+`);
+await runAsync(`
+  CREATE TABLE IF NOT EXISTS cash_movements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    type TEXT CHECK(type IN ('ingreso','egreso')) NOT NULL,
+    concept TEXT NOT NULL,
+    amount REAL NOT NULL,
+    payment_method TEXT,
+    user_id INTEGER,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES cash_sessions(id),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  )
+`);
 }
 ensureCashTables();
 // --------------------------------------------
@@ -77,10 +77,13 @@ async function getSessionByDate(dateStr) {
 }
 async function createSession({ date, opening_amount, carried_balance = 0 }) {
   const ds = toISODate(date);
+  
   await runAsync(
-    `INSERT INTO cash_sessions (date, opening_amount, carried_balance, closed) VALUES (?, ?, ?, 0)`,
-    [ds, Number(opening_amount || 0), Number(carried_balance || 0)]
+    `INSERT INTO cash_sessions (date, opening_amount, carried_balance, closed, created_at)
+    VALUES (?, ?, ?, 0, ?)`,
+    [ds, Number(opening_amount || 0), Number(carried_balance || 0), fechaAR]
   );
+
   return await getSessionByDate(ds);
 }
 async function getLastClosedSession() {
@@ -142,6 +145,7 @@ const addCashMovement = async (req, res) => {
   try {
     const { type, concept, amount, payment_method } = req.body;
     const user_id = req.user?.id || null;
+
     if (!['ingreso', 'egreso'].includes(type)) {
       return res.status(422).json({ error: 'type debe ser ingreso o egreso' });
     }
@@ -151,16 +155,27 @@ const addCashMovement = async (req, res) => {
 
     const session = await getOpenSession();
     if (!session) {
-      return res.status(409).json({ error: 'No hay caja abierta hoy. Abra la caja para registrar movimientos.' });
+      return res.status(409).json({ error: 'No hay caja abierta. Abra la caja para registrar movimientos.' });
     }
 
+    // 🕒 Obtener la fecha exacta de la caja abierta, según timezone argentino
+    const fechaCaja = session.date; // la fecha con la que se abrió la caja
+    const fechaHoraAR = getCurrentARTimestamp(); // timestamp AR actual
+
+    // Insertar movimiento usando la fecha de la caja (no la del sistema)
     await runAsync(
-      `INSERT INTO cash_movements (session_id, type, concept, amount, payment_method, user_id)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [session.id, type, concept, Math.abs(Number(amount)), payment_method || null, user_id]
+      `INSERT INTO cash_movements (session_id, type, concept, amount, payment_method, user_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [session.id, type, concept, Math.abs(Number(amount)), payment_method || null, user_id, fechaHoraAR]
     );
 
-    return res.status(201).json({ message: 'Movimiento registrado' });
+    // 🔹 Actualizar el campo date del movimiento con la fecha de la caja
+    await runAsync(
+      `UPDATE cash_movements SET date = ? WHERE id = (SELECT MAX(id) FROM cash_movements)`
+      , [fechaCaja]
+    );
+
+    return res.status(201).json({ message: 'Movimiento registrado correctamente con fecha de la caja abierta' });
   } catch (err) {
     console.error('addCashMovement:', err);
     return res.status(500).json({ error: 'Error al registrar movimiento' });
@@ -176,11 +191,13 @@ async function recordSaleIncome({ total, payment_method = 'efectivo', user_id, s
     // Política: bloquear si no hay sesión abierta
     throw new Error('No hay caja abierta hoy. Debe abrir caja antes de registrar ventas.');
   }
+  
   await runAsync(
-    `INSERT INTO cash_movements (session_id, type, concept, amount, payment_method, user_id)
-     VALUES (?, 'ingreso', ?, ?, ?, ?)`,
-    [session.id, `Venta #${sale_id}`, Number(total), payment_method, user_id || null]
+    `INSERT INTO cash_movements (session_id, type, concept, amount, payment_method, user_id, created_at)
+    VALUES (?, 'ingreso', ?, ?, ?, ?, ?)`,
+    [session.id, `Venta #${sale_id}`, Number(total), payment_method, user_id || null, fechaAR]
   );
+
 }
 
 async function recordRefundExpense({ total, sale_id, refund_id, user_id }) {
@@ -188,11 +205,13 @@ async function recordRefundExpense({ total, sale_id, refund_id, user_id }) {
   if (!session) {
     throw new Error('No hay caja abierta hoy. Debe abrir caja antes de registrar notas de crédito.');
   }
+  
   await runAsync(
-    `INSERT INTO cash_movements (session_id, type, concept, amount, payment_method, user_id)
-     VALUES (?, 'egreso', ?, ?, ?, ?)`,
-    [session.id, `Nota de crédito #${refund_id} (Venta #${sale_id})`, Math.abs(Number(total)), 'efectivo', user_id || null]
+    `INSERT INTO cash_movements (session_id, type, concept, amount, payment_method, user_id, created_at)
+    VALUES (?, 'egreso', ?, ?, ?, ?, ?)`,
+    [session.id, `Nota de crédito #${refund_id} (Venta #${sale_id})`, Math.abs(Number(total)), 'efectivo', user_id || null, fechaAR]
   );
+
 }
 
 // --------------------------------------------
@@ -214,14 +233,17 @@ const closeCashSession = async (req, res) => {
 
     const closing = Number(session.opening_amount) + income - expense;
 
+    const fechaCierreAR = getCurrentARTimestamp();
+
     await runAsync(
       `UPDATE cash_sessions
-       SET total_income = ?, total_expense = ?, closing_amount = ?, carried_balance = ?, closed = 1
-       WHERE id = ?`,
-      [income, expense, closing, closing, session.id]
+      SET total_income = ?, total_expense = ?, closing_amount = ?, carried_balance = ?, closed = 1, closed_at = ?
+      WHERE id = ?`,
+      [income, expense, closing, closing, fechaCierreAR, session.id]
     );
 
     const closed = await getAsync(`SELECT * FROM cash_sessions WHERE id = ?`, [session.id]);
+    session.closed_at = fechaCierreAR;
     return res.json({ message: 'Caja cerrada', session: closed });
   } catch (err) {
     console.error('closeCashSession:', err);
@@ -296,14 +318,18 @@ function buildPeriodRange({ period, start_date, end_date }) {
 }
 
 // ✅ Versión corregida de queryCashRange — soporta día, semana, mes, año y personalizados
+// ✅ VERSIÓN CORREGIDA CON TZ ARG Y FILTRO FIJO DE FECHAS
+
+
 async function queryCashRange({ start, end }) {
-  const startDate = start.slice(0, 10);
-  const endDate = end.slice(0, 10);
-  console.log('queryCashRange:', startDate, endDate); 
+  const startDate = (start || getCurrentARDate()).slice(0, 10);
+  const endDate = (end || getCurrentARDate()).slice(0, 10);
+
+  // 🔹 Filtramos sin confiar en SQLite DATE(), sino por rango textual fijo
   const sessions = await allAsync(
     `SELECT *
      FROM cash_sessions
-     WHERE substr(date, 1, 10) >= ? AND substr(date, 1, 10) <= ?
+     WHERE date(date) BETWEEN ? AND ?
      ORDER BY date ASC`,
     [startDate, endDate]
   );
@@ -312,7 +338,7 @@ async function queryCashRange({ start, end }) {
     `SELECT m.*, s.date
      FROM cash_movements m
      INNER JOIN cash_sessions s ON s.id = m.session_id
-     WHERE substr(s.date, 1, 10) >= ? AND substr(s.date, 1, 10) <= ?
+     WHERE date(s.date) BETWEEN ? AND ?
      ORDER BY s.date ASC, m.created_at ASC`,
     [startDate, endDate]
   );
@@ -338,7 +364,7 @@ const getCashReport = async (req, res) => {
         s.payment_method,
         'venta' AS type
       FROM sales s
-      WHERE DATE(s.created_at) BETWEEN DATE(?) AND DATE(?)
+      WHERE date(s.created_at) BETWEEN ? AND ?
       
       UNION ALL
       
@@ -349,8 +375,8 @@ const getCashReport = async (req, res) => {
         'nota de crédito' AS payment_method,
         'nota_credito' AS type
       FROM refunds r
-      WHERE DATE(r.created_at) BETWEEN DATE(?) AND DATE(?)
-      
+      WHERE date(r.created_at) BETWEEN ? AND ?
+     
       ORDER BY date ASC
     `, [range.start, range.end, range.start, range.end]);
 
@@ -365,38 +391,50 @@ const getCashReport = async (req, res) => {
     }
 
     // 🔹 Calcular totales de ventas y notas de crédito
+    // 🔹 Calcular totales de ventas discriminados por método de pago
     const salesTotals = {};
     for (const s of sales) {
       const d = s.date.slice(0, 10);
-      if (!salesTotals[d]) salesTotals[d] = 0;
-      salesTotals[d] += Number(s.amount || 0);
+      const metodo = (s.payment_method || 'sin_especificar').toLowerCase();
+      if (!salesTotals[d]) salesTotals[d] = { total: 0 };
+      if (!salesTotals[d][metodo]) salesTotals[d][metodo] = 0;
+
+      salesTotals[d][metodo] += Number(s.amount || 0);
+      salesTotals[d].total += Number(s.amount || 0);
     }
 
+
     // 🔹 Generar resumen por sesión
+
     const summary = sessions.map(s => {
       const live = liveBySession[s.id] || { income: 0, expense: 0 };
       const opening = Number(s.opening_amount || 0);
       const income  = s.closed ? Number(s.total_income || 0)  : live.income;
-      const expense = s.closed ? Number(s.total_expense || 0) : live.expense;
+      let expense = s.closed ? Number(s.total_expense || 0) : live.expense;
 
-      const salesTotal = salesTotals[s.date] || 0;
+      // 🧾 Agregar al gasto los importes de notas de crédito del mismo día
+      const refundsOfDay = sales.filter(x => x.type === 'nota_credito' && x.date === s.date);
+      const refundsTotal = refundsOfDay.reduce((acc, r) => acc + Math.abs(Number(r.amount || 0)), 0);
+      expense += refundsTotal;
 
+      const daySales = salesTotals[s.date] || {};
+      const salesTotal = daySales.total || 0;
       const closing = s.closed
         ? Number(s.closing_amount ?? opening)
         : opening + income + salesTotal - expense;
-
-      const total = opening + income + salesTotal - expense;
 
       return {
         date: s.date,
         opening,
         income,
-        salesTotal,
         expense,
+        salesTotal,
+        salesByMethod: daySales, // 🟢 nuevo campo
         closing,
-        total
+        total: opening + income + salesTotal - expense
       };
     });
+
 
     // =======================================
     

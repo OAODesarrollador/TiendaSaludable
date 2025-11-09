@@ -4,6 +4,8 @@ import { salesAPI } from '../services/api';
 import { toast } from 'react-toastify';
 import { Eye, Download, Search, IterationCw } from 'lucide-react';
 import axios from 'axios';
+import { formatFechaHoraAR,  getCurrentARDate } from '../config/timezoneF';
+
 
 const Sales = () => {
   const [sales, setSales] = useState([]);
@@ -15,9 +17,12 @@ const Sales = () => {
     items: [], // { product_id, product_name, max, selected: bool, quantity: number }
     reason: ''
   });
+
+  const hoyAR = getCurrentARDate();
+
   const [filters, setFilters] = useState({
-    start_date: '',
-    end_date: ''
+    start_date: hoyAR,
+    end_date: hoyAR
   });
 
   useEffect(() => {
@@ -690,8 +695,9 @@ const printRefundTicket = (refund) => {
         #{sale.id}
       </td>
       <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900">
-        {new Date(sale.created_at).toLocaleString('es-AR')}
+        {formatFechaHoraAR(new Date(sale.created_at))}
       </td>
+
       <td className="px-6 py-1 whitespace-nowrap text-sm text-gray-900">
         {sale.seller_name}
       </td>

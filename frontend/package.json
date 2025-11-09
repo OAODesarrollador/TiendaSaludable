@@ -6,8 +6,11 @@
   "dependencies": {
     "axios": "^1.13.1",
     "bootstrap": "^5.3.8",
+    "exceljs": "^4.4.0",
+    "file-saver": "^2.0.5",
     "html2canvas": "^1.4.1",
-    "jspdf": "^2.5.1",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^5.0.2",
     "lucide-react": "^0.545.0",
     "react": "^18.3.1",
     "react-barcode": "^1.6.1",

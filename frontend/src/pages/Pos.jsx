@@ -3,7 +3,7 @@ import { productsAPI, salesAPI } from '../services/api';
 import { toast } from 'react-toastify';
 import { Search, Trash2, Plus, Minus, ShoppingCart, Printer, Download, X, Calculator } from 'lucide-react';
 import logo from '../assets/Avenia.png';
-import { formatFechaHoraAR } from "../config/timezone";
+import { formatFechaHoraAR } from "../config/timezoneF";
 
 const POS = () => {
   const [products, setProducts] = useState([]);
@@ -208,7 +208,9 @@ const POS = () => {
 
     const saleItems = lastSale.items ?? lastSale.line_items ?? lastSale.details ?? [];
 
-    const fechaHora = formatFechaHoraAR(lastSale?.created_at ?? Date.now());
+    const fechaHora = formatFechaHoraAR(
+  new Date(lastSale?.created_at ?? Date.now())
+);
 
 
     
@@ -976,7 +978,8 @@ const getExpirationMessage = (expirationDate) => {
 
             <div className="d-flex justify-content-between w-100">
               <span>Ticket #{lastSale.id}</span>
-              <span>{formatFechaHoraAR(lastSale?.created_at ?? lastSale?.date ?? Date.now())}</span>
+              <span>{formatFechaHoraAR(new Date(lastSale?.created_at ?? lastSale?.date ?? Date.now()))}</span>
+
 
             </div>
 

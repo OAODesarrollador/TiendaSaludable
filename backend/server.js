@@ -2,18 +2,20 @@
 // Configuración global del entorno y zona horaria (GMT-3)
 // =======================================================
 require('dotenv').config();
-process.env.TZ = process.env.TZ || 'America/Argentina/Buenos_Aires';
+// backend/src/server.js - PRIMERA LÍNEA
+process.env.TZ = 'America/Argentina/Buenos_Aires';
+// Forzar formato de hora 24h en todas las salidas locales
+process.env.LC_TIME = 'es_AR.UTF-8';
 
-console.log('🕒 Zona horaria activa:', process.env.TZ);
-console.log('🕐 Hora local actual:', new Date().toLocaleString('es-AR', {
-  timeZone: process.env.TZ,
-  hour12: false
-}));
+console.log('🌍 TZ configurado:', process.env.TZ);
+console.log('⏰ Hora del sistema:', new Date().toString());
+
+const express = require('express');
 
 // =======================================================
 // Dependencias
 // =======================================================
-const express = require('express');
+
 const cors = require('cors');
 const morgan = require('morgan');
 const path = require('path');
