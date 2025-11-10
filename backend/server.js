@@ -38,7 +38,63 @@ const db = require('./src/config/database');
 db.initialize();
 
 const app = express();
+
+// ===========================================
+// 🧩 Control inteligente de puerto y servidor
+// ===========================================
+const { execSync } = require("child_process");
 const PORT = process.env.PORT || 5000;
+
+// Función para cerrar procesos antiguos que usan el puerto
+function freePort(port) {
+  try {
+    console.log(`🔍 Verificando si el puerto ${port} está en uso...`);
+    if (process.platform === "win32") {
+      const output = execSync(`netstat -ano | findstr :${port}`).toString();
+      const lines = output.split("\n").filter(l => l.includes("LISTENING"));
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        const pid = parts[parts.length - 1];
+        if (pid) {
+          console.log(`⚠️  Cerrando proceso anterior (PID ${pid}) en puerto ${port}...`);
+          execSync(`taskkill /PID ${pid} /F`);
+        }
+      }
+    } else {
+      execSync(`fuser -k ${port}/tcp`);
+    }
+  } catch (err) {
+    // Si no hay proceso, no hacer nada
+  }
+}
+
+// 1️⃣ Liberar puerto antes de iniciar
+freePort(PORT);
+
+// 2️⃣ Iniciar servidor solo una vez
+const server = app.listen(PORT, () => {
+  console.log(`✅ Servidor backend escuchando en http://localhost:${PORT}`);
+});
+
+// 3️⃣ Manejo de errores
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`⚠️ El puerto ${PORT} sigue ocupado. Intentando cerrar y reintentar...`);
+    try {
+      freePort(PORT);
+      setTimeout(() => {
+        app.listen(PORT, () => {
+          console.log(`✅ Servidor backend reiniciado en http://localhost:${PORT}`);
+        });
+      }, 1500);
+    } catch (e) {
+      console.error("❌ No se pudo liberar el puerto automáticamente:", e.message);
+    }
+  } else {
+    console.error("❌ Error inesperado en el servidor:", err);
+  }
+});
+
 
 // =======================================================
 // Middlewares
@@ -89,13 +145,6 @@ app.use((err, req, res, next) => {
   });
 });
 
-// =======================================================
-// Iniciar servidor
-// =======================================================
-app.listen(PORT, () => {
-  console.log(`\n🌿 Servidor iniciado en http://localhost:${PORT}`);
-  console.log(`📊 Ambiente: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 Frontend: ${process.env.FRONTEND_URL}\n`);
-});
+
 
 module.exports = app;
