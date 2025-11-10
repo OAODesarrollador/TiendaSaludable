@@ -209,120 +209,173 @@ const Caja = () => {
 // 🧾 Exportar resumen de sesiones a PDF (robusto para Vite)
 const handleExportPDF = async () => {
   try {
-    if (!report?.sessions || report.sessions.length === 0) {
-      alert("No hay datos para exportar.");
-      return;
-    }
+    const doc = new jsPDF("p", "mm", "a4");
+    const fechaActual = getCurrentARTimestamp();
+    const fechaCaja = session?.date || getCurrentARDate();
+    const estadoCaja = session?.closed ? "CERRADA" : "ABIERTA";
 
-    // ⬇️ Import dinámico: evita problemas de plugin no registrado
-    const { default: autoTable } = await import("jspdf-autotable");
-    const doc = new jsPDF();
-
-    const fechaReporte = getCurrentARTimestamp();
-    const fechaCaja    = session?.date || getCurrentARDate();
-    const estadoCaja   = session?.closed ? "CERRADA" : "ABIERTA";
-
-    // Encabezado
+    // === Encabezado ===
     doc.setFontSize(14);
-    doc.text("Resumen de Caja - Tienda Natural", 14, 15);
+    doc.text("Resumen de Caja - Tienda Natural", 105, 15, { align: "center" });
     doc.setFontSize(10);
-    doc.text(`Generado: ${fechaReporte}`, 14, 22);
-    doc.text(`Caja del ${fechaCaja} — Estado: ${estadoCaja}`, 14, 28);
+    doc.text(`Generado: ${fechaActual}`, 14, 25);
+    doc.text(`Caja del ${fechaCaja} | Estado: ${estadoCaja}`, 14, 31);
 
-    // Armar filas (incluye ventas discriminadas si las tenés en report.sessions[i].salesByMethod)
-    const rows = report.sessions.map((r) => {
-  const ventas = r.salesByMethod || {};
-  const metodos = Object.keys(ventas)
-    .filter((k) => k !== "total")
-    .map((m) => `${m}: $${Number(ventas[m] || 0).toFixed(2)}`)
-    .join("\n");
+    // === Datos base ===
+    const sesiones = report?.sessions || [];
+    const movimientos = report?.movements || [];
+    const ventasTickets = report?.sales || [];
 
-  // 🟢 Buscar movimientos por tipo (ingresos/egresos)
-  const movimientosIngreso = report.movements
-    ?.filter(m => m.date === r.date && m.type === "ingreso")
-    .map(m => `• ${m.concept}: $${Number(m.amount).toFixed(2)}`)
-    .join("\n") || "—";
+    const totalApertura = sesiones.reduce(
+      (a, r) => a + Number(r.opening || r.opening_amount || 0),
+      0
+    );
 
-// 🟢 Egresos = egresos manuales (movements) + notas de crédito (sales) del mismo día
+    const ingresosPorConcepto = {};
+    movimientos
+      .filter((m) => m.type === "ingreso")
+      .forEach((m) => {
+        const key = (m.concept || "Ingreso").trim();
+        ingresosPorConcepto[key] =
+          (ingresosPorConcepto[key] || 0) + Number(m.amount || 0);
+      });
 
-    const egresosMovs = (report.movements || [])
-      .filter(m => m.date === r.date && m.type === "egreso");
-
-    const manualExpenseTotal = egresosMovs
-      .reduce((acc, m) => acc + Number(m.amount || 0), 0);
-
-    const refundsOfDay = (report.sales || [])
-      .filter(s => s.type === "nota_credito" && (s.date || "").slice(0,10) === r.date);
-
-    const refundsTotal = refundsOfDay
-      .reduce((acc, s) => acc + Math.abs(Number(s.amount ?? s.total ?? 0)), 0);
-
-    const movimientosEgreso = [
-      `Egresos manuales: $${manualExpenseTotal.toFixed(2)}`,
-      `Notas de crédito: $${refundsTotal.toFixed(2)}`,
-     
-    ].join("\n");
-
-    return [
-      r.date,
-      `$${Number(r.opening || 0).toFixed(2)}`,
-      movimientosIngreso,
-      metodos || "—",
-      movimientosEgreso,
-      `$${Number(r.total || 0).toFixed(2)}`
-    ];
-  });
-
-
-    // Tabla
-    autoTable(doc, {
-      startY: 35,
-      head: [["Fecha", "Apertura", "Ingresos", "Ventas (por método)", "Egresos", "Total"]],
-      body: rows,
-      styles: { fontSize: 9, cellPadding: 3 },
-      headStyles: { fillColor: [52, 152, 219], textColor: 255, halign: "center" },
-      alternateRowStyles: { fillColor: [245, 245, 245] },
+    const ventasPorMetodo = {};
+    sesiones.forEach((s) => {
+      const vm = s.salesByMethod || {};
+      Object.keys(vm).forEach((met) => {
+        if (met !== "total") {
+          ventasPorMetodo[met] =
+            (ventasPorMetodo[met] || 0) + Number(vm[met] || 0);
+        }
+      });
     });
 
-    // Total general
-// 🧾 Totales al pie de tabla como footer con ventas por método
-const totalApertura = report.sessions.reduce((a, r) => a + Number(r.opening || 0), 0);
-const totalIngresos = report.sessions.reduce((a, r) => a + Number(r.income || 0), 0);
-const totalEgresos = report.sessions.reduce((a, r) => a + Number(r.expense || 0), 0);
-const totalGeneral = report.sessions.reduce((a, r) => a + Number(r.total || 0), 0);
+    const egresosPorConcepto = {};
+    movimientos
+      .filter((m) => m.type === "egreso")
+      .forEach((m) => {
+        const key = (m.concept || "Egreso").trim();
+        egresosPorConcepto[key] =
+          (egresosPorConcepto[key] || 0) + Number(m.amount || 0);
+      });
 
-// 🔹 Calcular ventas totales por método
-const metodoSuma = {};
-report.sessions.forEach(s => {
-  const ventas = s.salesByMethod || {};
-  Object.keys(ventas).forEach(m => {
-    if (m !== "total") {
-      metodoSuma[m] = (metodoSuma[m] || 0) + Number(ventas[m] || 0);
-    }
-  });
-});
-const totalMetodos = Object.values(metodoSuma).reduce((a, b) => a + b, 0);
-const metodosTexto = `${totalMetodos.toFixed(2)}`;
+    const totalNotasCredito = ventasTickets
+      .filter((s) => (s.type || "").toLowerCase() === "nota_credito")
+      .reduce((acc, s) => acc + Math.abs(Number(s.amount ?? s.total ?? 0)), 0);
 
-autoTable(doc, {
-  startY: doc.lastAutoTable.finalY + 5,
-  head: [["Totales", "Apertura", "Ingresos", "Ventas (por método)", "Egresos", "Total"]],
-  body: [[
-    "",
-    `$${totalApertura.toFixed(2)}`,
-    `$${totalIngresos.toFixed(2)}`,
-    metodosTexto,
-    `$${totalEgresos.toFixed(2)}`,
-    `$${totalGeneral.toFixed(2)}`
-  ]],
-  styles: { fontSize: 9, cellPadding: 3, valign: "top" },
-  headStyles: { fillColor: [46, 204, 113], textColor: 255 },
-});
+    // === Formato base ===
+    const startX = 14;
+    let y = 40;
+    const lineHeight = 7;
+    const colWidth = [70, 25, 25, 25, 25, 25]; // Descripción + 5 columnas
+    const headers = ["Descripción", "Apertura", "Ingresos", "Ventas", "Egresos", "Total"];
 
-doc.setFontSize(9);
-doc.text(" Los egresos incluyen notas de crédito emitidas en el período.", 14, doc.lastAutoTable.finalY + 8);
-// 🟢 Descargar automáticamente
-doc.save(`Resumen_Caja_${getCurrentARDate()}.pdf`);
+    const drawRow = (data, isHeader = false, bold = false, fill = false) => {
+      let x = startX;
+      if (fill) {
+        doc.setFillColor(230, 255, 230);
+        doc.rect(x, y - 5, colWidth.reduce((a, b) => a + b, 0), lineHeight, "F");
+      }
+      doc.setFont(undefined, bold ? "bold" : "normal");
+      data.forEach((text, i) => {
+        const val = text || "";
+        doc.text(String(val), x + 2, y);
+        x += colWidth[i];
+      });
+      y += lineHeight;
+    };
+
+    // === Tabla ===
+    drawRow(headers, true, true, true);
+
+    const addSection = (titulo, rows) => {
+      doc.setTextColor(0, 128, 0);
+      doc.setFontSize(11);
+      doc.text(titulo, startX, y + 3);
+      y += lineHeight;
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(9);
+      rows.forEach((r) => drawRow(r));
+      y += 2;
+    };
+
+    // Secciones
+    if (totalApertura > 0)
+      addSection("Apertura", [
+        ["Apertura de caja", totalApertura.toFixed(2), "", "", "", ""],
+      ]);
+
+    const filasIngresos = Object.entries(ingresosPorConcepto).map(([c, m]) => [
+      c,
+      "",
+      m.toFixed(2),
+      "",
+      "",
+      ""
+    ]);
+    if (filasIngresos.length > 0) addSection("Ingresos", filasIngresos);
+
+    const filasVentas = Object.entries(ventasPorMetodo).map(([m, v]) => [
+      `Venta - ${m}`,
+      "",
+      "",
+      v.toFixed(2),
+      "",
+      "",
+    ]);
+    if (filasVentas.length > 0) addSection("Ventas", filasVentas);
+
+    const filasEgresos = Object.entries(egresosPorConcepto).map(([c, m]) => [
+      c,
+      "",
+      "",
+      "",
+      m.toFixed(2),
+      "",
+    ]);
+    if (filasEgresos.length > 0) addSection("Egresos", filasEgresos);
+
+    if (totalNotasCredito > 0)
+      addSection("Notas de Crédito", [
+        ["Notas de crédito", "", "", "", totalNotasCredito.toFixed(2), ""],
+      ]);
+
+    // Totales
+    const totalIngresos = Object.values(ingresosPorConcepto).reduce((a, b) => a + b, 0);
+    const totalVentas = Object.values(ventasPorMetodo).reduce((a, b) => a + b, 0);
+    const totalEgresos =
+      Object.values(egresosPorConcepto).reduce((a, b) => a + b, 0) + totalNotasCredito;
+    const totalGeneral = totalApertura + totalIngresos + totalVentas - totalEgresos;
+
+    drawRow(
+      [
+        "Totales generales",
+        totalApertura.toFixed(2),
+        totalIngresos.toFixed(2),
+        totalVentas.toFixed(2),
+        totalEgresos.toFixed(2),
+        totalGeneral.toFixed(2),
+      ],
+      false,
+      true,
+      true
+    );
+
+    y += 5;
+    doc.setFontSize(9);
+    doc.setTextColor(90);
+    doc.text(
+      "Nota: Los egresos incluyen las notas de crédito.",
+      startX,
+      y,
+      { maxWidth: 180 }
+    );
+
+    // === Previsualizar ===
+    const blob = doc.output("blob");
+    const url = URL.createObjectURL(blob);
+    window.open(url);
   } catch (err) {
     console.error("Error al exportar PDF:", err);
     alert("Error al exportar PDF. Revisa la consola.");
@@ -334,7 +387,7 @@ const handleExportExcel = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Resumen Caja");
 
-    // Título
+    // ====== Encabezado ======
     worksheet.mergeCells("A1:F1");
     worksheet.getCell("A1").value = "Resumen de Caja - Tienda Natural";
     worksheet.getCell("A1").font = { bold: true, size: 14 };
@@ -348,112 +401,139 @@ const handleExportExcel = async () => {
     worksheet.getCell("A2").value = `Generado: ${fechaReporte} | Caja del ${fechaCaja} | Estado: ${estadoCaja}`;
     worksheet.getCell("A2").alignment = { horizontal: "center" };
 
-    // Encabezados
-    worksheet.addRow(["Fecha", "Apertura", "Ingresos", "Ventas", "Egresos", "Total"]);
+    // ====== Encabezados de tabla ======
+    // Reemplazamos "Fecha" por "Descripción" y mantenemos las demás columnas:
+    // Descripción | Apertura | Ingresos | Ventas | Egresos | Total
+    worksheet.addRow(["Descripción", "Apertura", "Ingresos", "Ventas", "Egresos", "Total"]);
     worksheet.getRow(3).font = { bold: true };
 
-    // Filas
-    report.sessions.forEach((r) => {
-    const ventas = r.salesByMethod || {};
-    const metodos = Object.keys(ventas)
-      .filter((k) => k !== "total")
-      .map((m) => `${m}: $${ventas[m].toFixed(2)}`)
-      .join("\n");
+    // ====== Agregaciones para el período ======
+    const sesiones = report?.sessions || [];
+    const movimientos = report?.movements || [];
+    const ventasTickets = report?.sales || [];
 
-    // 🟢 Detallar ingresos/egresos
-    const ingresosDetallados = report.movements
-      ?.filter(m => m.date === r.date && m.type === "ingreso")
-      .map(m => `• ${m.concept}: $${Number(m.amount).toFixed(2)}`)
-      .join("\n") || "—";
+    // -- Apertura (suma de todas las aperturas del período)
+    const totalApertura = sesiones.reduce((a, r) => a + Number(r.opening || r.opening_amount || 0), 0);
 
-   
-  // 🟢 Egresos = egresos manuales (movements) + notas de crédito (sales) del mismo día
+    // -- Ingresos agrupados por concepto
+    const ingresosPorConcepto = {};
+    movimientos
+      .filter((m) => m.type === "ingreso")
+      .forEach((m) => {
+        const key = (m.concept || "Ingreso").trim();
+        ingresosPorConcepto[key] = (ingresosPorConcepto[key] || 0) + Number(m.amount || 0);
+      });
 
-    const egresosMovs = (report.movements || [])
-      .filter(m => m.date === r.date && m.type === "egreso");
+    // -- Ventas por método (acumuladas desde salesByMethod de cada sesión)
+    const ventasPorMetodo = {};
+    sesiones.forEach((s) => {
+      const vm = s.salesByMethod || {};
+      Object.keys(vm).forEach((met) => {
+        if (met !== "total") {
+          ventasPorMetodo[met] = (ventasPorMetodo[met] || 0) + Number(vm[met] || 0);
+        }
+      });
+    });
 
-    const manualExpenseTotal = egresosMovs
-      .reduce((acc, m) => acc + Number(m.amount || 0), 0);
+    // -- Egresos agrupados por concepto
+    const egresosPorConcepto = {};
+    movimientos
+      .filter((m) => m.type === "egreso")
+      .forEach((m) => {
+        const key = (m.concept || "Egreso").trim();
+        egresosPorConcepto[key] = (egresosPorConcepto[key] || 0) + Number(m.amount || 0);
+      });
 
-    const refundsOfDay = (report.sales || [])
-      .filter(s => s.type === "nota_credito" && (s.date || "").slice(0,10) === r.date);
-
-    const refundsTotal = refundsOfDay
+    // -- Notas de crédito como egreso (una sola fila)
+    const totalNotasCredito = ventasTickets
+      .filter((s) => (s.type || "").toLowerCase() === "nota_credito")
       .reduce((acc, s) => acc + Math.abs(Number(s.amount ?? s.total ?? 0)), 0);
 
-    const egresosDetallados = [
-      `Egresos manuales: $${manualExpenseTotal.toFixed(2)}`,
-      `Notas de crédito: $${refundsTotal.toFixed(2)}`,
-      `Total egresos del día: $${(manualExpenseTotal + refundsTotal).toFixed(2)}`
-    ].join("\n");
+    // ====== Construcción de filas (1 fila por descripción) ======
+    const addRow = (descripcion, apertura = 0, ingreso = 0, venta = 0, egreso = 0) => {
+      const totalFila = Number(apertura || 0) + Number(ingreso || 0) + Number(venta || 0) + Number(egreso || 0);
+      const row = worksheet.addRow([
+        descripcion,
+        apertura ? Number(apertura).toFixed(2) : "",
+        ingreso ? Number(ingreso).toFixed(2) : "",
+        venta ? Number(venta).toFixed(2) : "",
+        egreso ? Number(egreso).toFixed(2) : "",
+        "",
+      ]);
+      row.eachCell((cell, colNumber) => {
+        cell.alignment = { wrapText: true, vertical: "top" };
+        if (colNumber > 1) {
+          // Alineamos montos al centro para una lectura más prolija
+          cell.alignment = { ...cell.alignment, horizontal: "center" };
+        }
+      });
+    };
 
+    // 2.1) Fila de Apertura (si hubo)
+    if (totalApertura > 0) addRow("Apertura de caja", totalApertura, 0, 0, 0);
 
-    const row = worksheet.addRow([
-      r.date,
-      Number(r.opening).toFixed(2),
-      ingresosDetallados,
-      metodos || "—",
-      egresosDetallados,
-      Number(r.total).toFixed(2),
+    // 2.2) Filas de Ingresos (por concepto)
+    Object.entries(ingresosPorConcepto).forEach(([concepto, monto]) => {
+      addRow(concepto, 0, monto, 0, 0);
+    });
+
+    // 2.3) Filas de Ventas (por método)
+    Object.entries(ventasPorMetodo).forEach(([metodo, monto]) => {
+      addRow(`Venta - ${metodo}`, 0, 0, monto, 0);
+    });
+
+    // 2.4) Filas de Egresos (por concepto)
+    Object.entries(egresosPorConcepto).forEach(([concepto, monto]) => {
+      addRow(concepto, 0, 0, 0, monto);
+    });
+
+    // 2.5) Fila de Notas de crédito (si hubo)
+    if (totalNotasCredito > 0) addRow("Notas de crédito", 0, 0, 0, totalNotasCredito);
+
+    // ====== Ancho de columnas ======
+    worksheet.columns.forEach((col, idx) => {
+      col.width = idx === 0 ? 40 : 18; // Descripción más ancha
+    });
+
+    // ====== Footer con totales ======
+    const totalIngresos = Object.values(ingresosPorConcepto).reduce((a, b) => a + b, 0);
+    const totalVentas = Object.values(ventasPorMetodo).reduce((a, b) => a + b, 0);
+    const totalEgresos =
+      Object.values(egresosPorConcepto).reduce((a, b) => a + b, 0) + totalNotasCredito;
+
+    const totalGeneral = totalApertura + totalIngresos + totalVentas - totalEgresos;
+
+    const footerRow = worksheet.addRow([
+      "Totales",
+      totalApertura.toFixed(2),
+      totalIngresos.toFixed(2),
+      totalVentas.toFixed(2),
+      totalEgresos.toFixed(2),
+      totalGeneral.toFixed(2),
     ]);
+    footerRow.font = { bold: true };
+    footerRow.eachCell((cell) => {
+      cell.alignment = { wrapText: true, horizontal: "center", vertical: "top" };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD6F5D6" } };
+    });
 
-  // 🟢 permitir saltos de línea dentro de las celdas
-  row.eachCell((cell) => {
-    cell.alignment = { wrapText: true, vertical: "top" };
-  });
-});
+    // Comentario aclaratorio
+    const infoRow = worksheet.addRow([
+      "Nota: Los egresos incluyen las notas de crédito del período",
+    ]);
+    infoRow.font = { italic: true, color: { argb: "FF555555" } };
+    infoRow.getCell(1).alignment = { wrapText: true };
+    worksheet.mergeCells(`A${infoRow.number}:F${infoRow.number}`);
 
-
-
-    worksheet.columns.forEach((col) => (col.width = 20));
-
-// 🧾 Totales con ventas por método
-const totalApertura = report.sessions.reduce((a, r) => a + Number(r.opening || 0), 0);
-const totalIngresos = report.sessions.reduce((a, r) => a + Number(r.income || 0), 0);
-const totalEgresos = report.sessions.reduce((a, r) => a + Number(r.expense || 0), 0);
-const totalGeneral = report.sessions.reduce((a, r) => a + Number(r.total || 0), 0);
-
-// 🔹 Calcular ventas totales por método
-const metodoSuma = {};
-report.sessions.forEach(s => {
-  const ventas = s.salesByMethod || {};
-  Object.keys(ventas).forEach(m => {
-    if (m !== "total") {
-      metodoSuma[m] = (metodoSuma[m] || 0) + Number(ventas[m] || 0);
-    }
-  });
-});
-const totalMetodos = Object.values(metodoSuma).reduce((a, b) => a + b, 0);
-const metodosTexto = `${totalMetodos.toFixed(2)}`;
-
-// 🧾 Agregar fila final
-const footerRow = worksheet.addRow([
-  "Totales",
-  totalApertura.toFixed(2),
-  totalIngresos.toFixed(2),
-  metodosTexto,
-  totalEgresos.toFixed(2),
-  totalGeneral.toFixed(2)
-]);
-footerRow.font = { bold: true };
-footerRow.eachCell((cell) => {
-  cell.alignment = { wrapText: true, horizontal: "center", vertical: "top" };
-  cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD6F5D6" } };
-});
-
-// Comentario aclaratorio
-const infoRow = worksheet.addRow(["Los egresos incluyen las notas de crédito del período."]);
-infoRow.font = { italic: true, color: { argb: "FF555555" } };
-// 🟢 Generar y descargar archivo Excel
-const buffer = await workbook.xlsx.writeBuffer();
-saveAs(new Blob([buffer]), `Resumen_Caja_${getCurrentARDate()}.xlsx`);
-
-
+    // ====== Descargar XLSX ======
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveAs(new Blob([buffer]), `Resumen_Caja_${getCurrentARDate()}.xlsx`);
   } catch (err) {
     console.error("Error al exportar Excel:", err);
     alert("Error al exportar Excel. Revisa la consola.");
   }
 };
+
 const handlePreview = () => {
   if (!report?.sessions || report.sessions.length === 0) {
     alert("No hay datos para previsualizar.");

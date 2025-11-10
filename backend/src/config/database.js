@@ -1,3 +1,7 @@
+// Zona horaria local
+process.env.TZ = 'America/Argentina/Buenos_Aires';
+
+
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
