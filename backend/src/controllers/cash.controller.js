@@ -14,14 +14,21 @@ const fechaAR = getCurrentARTimestamp();
 // --------------------------------------------
 // Helpers
 // --------------------------------------------
+// TZ-safe: si es "YYYY-MM-DD" lo dejamos tal cual (no lo reparseamos con Date)
+// si es Date/fecha válida, devolvemos la fecha local sin tocar horas.
 const toISODate = (d = new Date()) => {
+  if (typeof d === 'string') {
+    // aceptar "YYYY-MM-DD" y normalizar a 10 chars por si viene con tiempo
+    const m = d.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) return m[1];
+  }
   const dt = new Date(d);
-  dt.setHours(0, 0, 0, 0);
   const y = dt.getFullYear();
   const m = String(dt.getMonth() + 1).padStart(2, '0');
   const day = String(dt.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 };
+
 const toLatinoDate = (d) => {
   if (!d) return '';
   if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}/.test(d)) {
@@ -75,6 +82,7 @@ async function getSessionByDate(dateStr) {
   const date = toISODate(dateStr);
   return await getAsync(`SELECT * FROM cash_sessions WHERE date = ?`, [date]);
 }
+
 async function createSession({ date, opening_amount, carried_balance = 0 }) {
   const ds = toISODate(date);
   
@@ -86,6 +94,7 @@ async function createSession({ date, opening_amount, carried_balance = 0 }) {
 
   return await getSessionByDate(ds);
 }
+
 async function getLastClosedSession() {
   return await getAsync(
     `SELECT * FROM cash_sessions WHERE closed = 1 ORDER BY date DESC LIMIT 1`
@@ -102,9 +111,13 @@ async function getOpenSession() {
 // --------------------------------------------
 const openCashSession = async (req, res) => {
   try {
-    const date = toISODate(new Date());
+    // 🕒 Usar la fecha enviada desde el front (si existe) o la fecha local Argentina
+    const date =
+      req.body.date && req.body.date.length === 10
+        ? req.body.date
+        : getCurrentARDate();
 
-    // ✅ Nueva validación: no abrir si hay cualquier caja abierta (aunque sea de ayer)
+    // ⚠️ Prevenir duplicados o sesiones abiertas
     const alreadyOpen = await getOpenSession();
     if (alreadyOpen) {
       return res.status(409).json({
@@ -112,7 +125,6 @@ const openCashSession = async (req, res) => {
       });
     }
 
-    // Validación original
     const existing = await getSessionByDate(date);
     if (existing && existing.closed === 0) {
       return res.status(409).json({ error: "La caja del día ya está abierta." });
@@ -121,16 +133,19 @@ const openCashSession = async (req, res) => {
       return res.status(409).json({ error: "La caja del día ya fue cerrada." });
     }
 
-    // Crear nueva sesión normalmente
+    // 🧮 Calcular saldo transportado desde la última caja cerrada
     const last = await getLastClosedSession();
     const carried = last ? Number(last.closing_amount || 0) : 0;
+
     const opening = Number(req.body?.opening_amount ?? carried);
+
     const session = await createSession({
-      date,
+      date, // ✅ ahora 100% en horario argentino
       opening_amount: opening,
       carried_balance: carried
     });
 
+    console.log(`✅ Caja abierta correctamente con fecha: ${date}`);
     return res.status(201).json({ message: "Caja abierta", session });
   } catch (err) {
     console.error("openCashSession:", err);

@@ -91,23 +91,30 @@ const Caja = () => {
 
   // 🔹 Abrir caja
   const handleOpenCaja = async () => {
-    setLoading(true);
-    try {
-      await api.post("/register", { opening_amount: parseFloat(amount) });
-      setMessage("✅ Caja abierta correctamente");
-      setShowMessageModal(true);
-      setShowOpenModal(false);
-      setAmount("");
-      fetchSession();
-      fetchReport();
-    } catch (err) {
-      setMessage(err.response?.data?.error || "Error al abrir la caja");
-      setShowMessageModal(true);
-    } finally {
-      setLoading(false);
-    }
-  };
-  // 🔹 Calcular resumen previo al cierre
+  setLoading(true);
+  try {
+    // 🕒 Si el usuario no elige una fecha, usar la actual en horario argentino
+    const fecha = selectedDate || getCurrentARDate();
+
+    await api.post("/register", { 
+      opening_amount: parseFloat(amount),
+      date: fecha
+    });
+
+    setMessage(`✅ Caja abierta correctamente para el día ${fecha}`);
+    setShowMessageModal(true);
+    setShowOpenModal(false);
+    setAmount("");
+    fetchSession();
+    fetchReport();
+  } catch (err) {
+    setMessage(err.response?.data?.error || "Error al abrir la caja");
+    setShowMessageModal(true);
+  } finally {
+    setLoading(false);
+  }
+};
+
   // 🔹 Calcular resumen previo al cierre (usando la fecha de la sesión abierta)
     const handlePreviewClose = async () => {
       try {
@@ -855,17 +862,30 @@ const lock = pending && session && !session.closed;
         <Modal.Header closeButton>
           <Modal.Title>💰 Abrir Caja</Modal.Title>
         </Modal.Header>
-        <Modal.Body>
-          <Form.Group>
-            <Form.Label>Monto inicial:</Form.Label>
-            <Form.Control
-              type="number"
-              placeholder="Ej: 1000"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-          </Form.Group>
-        </Modal.Body>
+          <Modal.Body>
+    <Form.Group className="mb-3">
+      <Form.Label>Fecha de apertura:</Form.Label>
+      <Form.Control
+        type="date"
+        value={selectedDate || getCurrentARDate()}
+        onChange={(e) => setSelectedDate(e.target.value)}
+      />
+      <Form.Text muted>
+        Por defecto se sugiere la fecha actual ({getCurrentARDate()})
+      </Form.Text>
+    </Form.Group>
+
+    <Form.Group>
+      <Form.Label>Monto inicial:</Form.Label>
+      <Form.Control
+        type="number"
+        placeholder="Ej: 1000"
+        value={amount}
+        onChange={(e) => setAmount(e.target.value)}
+      />
+    </Form.Group>
+  </Modal.Body>
+
         <Modal.Footer>
           <Button variant="secondary" onClick={() => setShowOpenModal(false)}>
             Cancelar

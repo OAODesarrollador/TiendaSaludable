@@ -29,8 +29,12 @@ function getCurrentARTimestamp() {
     }
   });
   
-  // Formato: YYYY-MM-DD HH:mm:ss (compatible con SQLite)
-  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
+  // Formato: YYYY-MM-DD HH:mm:ss (compatible con SQLite y migrador)
+  const fecha = `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
+  // Forzar coherencia con Node TZ configurado
+  process.env.TZ = TIMEZONE;
+  return fecha;
+
 }
 
 function formatFechaHoraAR(fecha) {

@@ -6,6 +6,10 @@ require('dotenv').config();
 process.env.TZ = 'America/Argentina/Buenos_Aires';
 // Forzar formato de hora 24h en todas las salidas locales
 process.env.LC_TIME = 'es_AR.UTF-8';
+// Control horario global para toda la app
+const { getCurrentARTimestamp } = require('./src/config/timezoneB');
+global.getCurrentARTimestamp = getCurrentARTimestamp;
+
 
 console.log('🌍 TZ configurado:', process.env.TZ);
 console.log('⏰ Hora del sistema:', new Date().toString());
