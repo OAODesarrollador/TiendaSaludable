@@ -41,18 +41,24 @@ const getDashboardStats = async (req, res) => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     
-    const topProducts = await allAsync(`
-      SELECT 
-        si.product_name,
-        SUM(si.quantity) as total_sold,
-        SUM(si.subtotal) as total_revenue
-      FROM sale_items si
-      INNER JOIN sales s ON si.sale_id = s.id
-      WHERE s.created_at >= ?
-      GROUP BY si.product_id, si.product_name
-      ORDER BY total_sold DESC
-      LIMIT 5
-    `, [thirtyDaysAgo.toISOString()]);
+    // Productos más vendidos (últimos 30 días)
+// ============================================
+// 📊 Top 15 productos más vendidos (últimos 30 días)
+// ============================================
+const topProducts = await allAsync(`
+  SELECT 
+    si.product_name,
+    SUM(si.quantity) AS total_sold,
+    SUM(si.subtotal) AS total_revenue
+  FROM sale_items si
+  INNER JOIN sales s ON si.sale_id = s.id
+  WHERE DATE(s.created_at) >= DATE('now', '-30 day')
+  GROUP BY si.product_id, si.product_name
+  ORDER BY total_sold DESC
+  LIMIT 15
+`);
+
+
     
     // Ventas por categoría (últimos 30 días)
     const salesByCategory = await allAsync(`
@@ -81,7 +87,19 @@ const getDashboardStats = async (req, res) => {
       ORDER BY s.created_at DESC
       LIMIT 10
     `);
-    
+
+    // Ventas por método de pago (últimos 30 días)
+const salesByPaymentMethod = await allAsync(`
+  SELECT 
+    payment_method,
+    COUNT(*) AS count,
+    SUM(total) AS total_revenue
+  FROM sales
+  WHERE DATE(created_at) >= DATE('now', '-30 day')
+  GROUP BY payment_method
+  ORDER BY total_revenue DESC
+`);
+
     res.json({
       today: {
         sales: todaySales[0].count || 0,
@@ -97,7 +115,8 @@ const getDashboardStats = async (req, res) => {
       },
       top_products: topProducts,
       sales_by_category: salesByCategory,
-      recent_sales: recentSales
+      recent_sales: recentSales,
+      sales_by_payment: salesByPaymentMethod
     });
   } catch (error) {
     console.error('Error obteniendo stats del dashboard:', error);
@@ -105,4 +124,33 @@ const getDashboardStats = async (req, res) => {
   }
 };
 
-module.exports = { getDashboardStats };
+// ============================================
+// 📊 Ventas por período (línea de tiempo)
+// ============================================
+const getSalesTimeline = async (req, res) => {
+  try {
+    const { start_date, end_date } = req.query;
+
+    if (!start_date || !end_date) {
+      return res.status(400).json({ error: 'Debe especificar fecha de inicio y fin' });
+    }
+
+    const sales = await allAsync(`
+      SELECT 
+        DATE(created_at) as date,
+        SUM(total) as total_revenue,
+        COUNT(*) as total_sales
+      FROM sales
+      WHERE DATE(created_at) BETWEEN DATE(?) AND DATE(?)
+      GROUP BY DATE(created_at)
+      ORDER BY DATE(created_at) ASC
+    `, [start_date, end_date]);
+
+    res.json(sales);
+  } catch (error) {
+    console.error('Error obteniendo gráfico de ventas por período:', error);
+    res.status(500).json({ error: 'Error al generar gráfico de ventas' });
+  }
+};
+
+module.exports = { getDashboardStats, getSalesTimeline };

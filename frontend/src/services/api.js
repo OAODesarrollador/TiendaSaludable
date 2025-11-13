@@ -79,8 +79,6 @@ export const salesAPI = {
 
 };
 
-
-// ========== REPORTS ==========
 // ========== REPORTS ==========
 export const reportsAPI = {
   // === Ventas ===
@@ -117,8 +115,11 @@ export const reportsAPI = {
 
 // ========== DASHBOARD ==========
 export const dashboardAPI = {
-  getStats: () => api.get('/dashboard/stats')
+  getStats: () => api.get('/dashboard/stats'),
+  getSalesTimeline: (start, end) =>
+    api.get(`/dashboard/timeline?start_date=${start}&end_date=${end}`) // ✅ Usa 'api' en vez de 'axios'
 };
+
 
 // ========== IMPORTADOR ==========
 
