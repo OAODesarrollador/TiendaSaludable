@@ -229,7 +229,7 @@ const POS = () => {
             <div style="width:33%; text-align:right;">${lineTotal.toFixed(2)}</div>
           </div>
           ${itemDiscount > 0 ? `
-            <div style="font-size:11px; color:#16a34a; text-align:right; padding-right:0;">
+            <div style="font-size:11px; text-align:right; padding-right:0;">
               Desc. producto: -${itemDiscount.toFixed(2)}
             </div>
           ` : ''}
@@ -272,31 +272,44 @@ const POS = () => {
 
         <div style="margin-top:12px; font-size:13px;">
           <div style="display:flex; justify-content:space-between;">
-            <span>Subtotal:</span>
-            <span>${saleSubtotal.toFixed(2)}</span>
-          </div>
-          ${saleDiscount > 0 ? `
-            <div style="display:flex; justify-content:space-between; color:#16a34a; font-weight:bold;">
-              <span>Descuento Total:</span>
-              <span>-${saleDiscount.toFixed(2)}</span>
-            </div>
-          ` : ''}
-          <div style="display:flex; justify-content:space-between;">
-            <span>Subtotal sin IVA:</span>
-            <span>${saleSubtotalNoTax.toFixed(2)}</span>
-          </div>
-          <div style="display:flex; justify-content:space-between;">
-            <span>IVA (21%):</span>
-            <span>${saleTax.toFixed(2)}</span>
-          </div>
-          <div style="display:flex; justify-content:space-between; font-weight:bold; margin-top:8px;">
-            <span>TOTAL:</span>
-            <span>${saleTotal.toFixed(2)}</span>
-          </div>
+  <span>Subtotal:</span>
+  <span>${saleSubtotal.toFixed(2)}</span>
+</div>
+
+${saleDiscount > 0 ? `
+  <div style="display:flex; justify-content:space-between; font-weight:bold;">
+    <span>Descuento Total:</span>
+    <span>-${saleDiscount.toFixed(2)}</span>
+  </div>
+` : ''}
+
+<div style="display:flex; justify-content:space-between;">
+  <span>Subtotal sin IVA:</span>
+  <span>${saleSubtotalNoTax.toFixed(2)}</span>
+</div>
+
+<div style="display:flex; justify-content:space-between;">
+  <span>IVA (21%):</span>
+  <span>${saleTax.toFixed(2)}</span>
+</div>
+
+<div style="display:flex; justify-content:space-between; font-weight:bold; margin-top:8px;">
+  <span>TOTAL:</span>
+  <span>${saleTotal.toFixed(2)}</span>
+</div>
+
         </div>
         <hr style="border: 1px solid gray; width: 100%; margin-top: 8px;">
         <div style="padding:8px; font-size:11px; solid">
-          <div>Forma de pago: ${lastSale.payment_method ?? '---'}</div>
+          <div>Forma de pago: ${({
+  efectivo: 'Efectivo',
+  debito: 'Tarjeta Débito',
+  tarjeta_credito: 'Tarjeta Crédito',
+  transferencia: 'Transferencia Bancaria',
+  qr: 'QR Genérico',
+  qrmp: 'Mercado Pago (QR MP)'
+}[lastSale.payment_method] || lastSale.payment_method)}
+ ?? '---'}</div>
         </div>
         <hr style="border: 1px solid gray; width: 100%; margin-top: auto;">
         <div style="text-align:center; margin-top:6px; font-size:12px;">
@@ -785,26 +798,31 @@ const getExpirationMessage = (expirationDate) => {
             <div className="mt-3">
               <label className="block text-sm font-medium text-gray-700 mb-1">Forma de Pago:</label>
               <div className="grid grid-cols-2 gap-2">
-                {[
-                  { key: 'efectivo', label: '💵 Efectivo', color: 'green' },
-                  { key: 'debito', label: '💳 Débito', color: 'blue' },
-                  { key: 'transferencia', label: '🏦 Transferencia', color: 'indigo' },
-                  { key: 'qr', label: '📱 QR', color: 'purple' },
-                  { key: 'tarjeta_credito', label: '💳 Crédito', color: 'orange' }, // opcional
-                ].map(({ key, label, color }) => (
-                  <button
-                    key={key}
-                    onClick={() => setPaymentMethod(key)}
-                    className={`py-2 rounded-lg border font-medium ${
-                      paymentMethod === key
-                        ? `bg-${color}-600 text-white border-${color}-600`
-                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+  {[
+    { key: 'efectivo', label: '💵 Efectivo', activeClass: 'bg-green-600 border-green-600 text-white' },
+{ key: 'debito', label: '💳 Débito', activeClass: 'bg-blue-600 border-blue-600 text-white' },
+{ key: 'transferencia', label: '🏦 Transferencia', activeClass: 'bg-indigo-600 border-indigo-600 text-white' },
+{ key: 'tarjeta_credito', label: '💳 Crédito', activeClass: 'bg-orange-600 border-orange-600 text-white' },
+
+// Métodos QR
+{ key: 'qr', label: '📱 QR Genérico', activeClass: 'bg-purple-600 border-purple-600 text-white' },
+{ key: 'qrmp', label: '📱 MP - QR Mercado Pago', activeClass: 'bg-blue-700 border-blue-700 text-white' },
+
+  ].map(({ key, label, activeClass }) => (
+    <button
+      key={key}
+      onClick={() => setPaymentMethod(key)}
+      className={`py-2 rounded-lg border font-medium transition ${
+        paymentMethod === key
+          ? activeClass
+          : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+      }`}
+    >
+      {label}
+    </button>
+  ))}
+</div>
+
             </div>
          
   
@@ -1037,7 +1055,18 @@ const getExpirationMessage = (expirationDate) => {
               </div>
 
               <div className="border-t border-b-2 border-gray-200 mb-2 mt-2 p-3 text-center">
-                <div className='fs-5'>Forma de pago: {lastSale.payment_method ?? '---'}</div>
+                <div className="fs-5">
+  Forma de pago:&nbsp;
+  {({
+    efectivo: "💵 Efectivo",
+    debito: "💳 Tarjeta Débito",
+    tarjeta_credito: "💳 Tarjeta Crédito",
+    transferencia: "🏦 Transferencia Bancaria",
+    qr: "📱 QR Genérico",
+    qrmp: "📱 Mercado Pago (QR MP)"
+  }[lastSale.payment_method] || lastSale.payment_method)}
+</div>
+
               </div>
             </div>
 
