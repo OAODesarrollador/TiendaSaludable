@@ -7,6 +7,17 @@ const PDFDocument = require('pdfkit');
 
 const { formatFechaHoraAR, getCurrentARTimestamp } = require('../config/timezoneB');
 
+// 💳 Comisión por método de pago (editable si querés hacerlo dinámico después)
+const COMMISSION_RATES = {
+  efectivo: 0,              // 0%
+  qr: 0.05,                 // 5%
+  qrmp: 0.06,               // 6%
+  transferencia: 0.01,      // 1%
+  debito: 0.03,             // 3%
+  tarjeta_credito: 0.08     // 8%
+};
+
+
 
 // ============================================
 // CREAR NUEVA VENTA
@@ -106,6 +117,35 @@ const createSale = async (req, res) => {
           ]
         );
       }
+
+// ===============================
+// 🧾 Registrar comisión por venta
+// ===============================
+const commissionRate = COMMISSION_RATES[payment_method] || 0;
+const commissionAmount = total * commissionRate;
+
+// Guardar comisión individual del ticket
+await runAsync(
+  `INSERT INTO sale_commissions 
+   (sale_id, payment_method, base_amount, commission_rate, commission_amount)
+   VALUES (?, ?, ?, ?, ?)`,
+  [saleId, payment_method, total, commissionRate, commissionAmount]
+);
+
+// ===============================
+// 🔥 Registrar movimiento de comisión en caja
+// (para que aparezca ANTES del cierre)
+// ===============================
+await runAsync(
+  `INSERT INTO movements (type, concept, amount, payment_method, date)
+   VALUES ('commission', ?, ?, ?, DATE('now', 'localtime'))`,
+  [
+    `Comisión ${payment_method}`,
+    Math.abs(commissionAmount),
+    payment_method
+  ]
+);
+
 
       await runAsync('COMMIT');
 

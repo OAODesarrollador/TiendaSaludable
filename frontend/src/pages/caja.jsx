@@ -135,14 +135,52 @@ const Caja = () => {
           return;
         }
 
-        const resumen = {
-          apertura: Number(todayData.opening ?? todayData.opening_amount ?? 0),
-          ingresos: Number(todayData.income ?? 0),
-          egresos:  Number(todayData.expense ?? 0),
-          cierre:   Number(todayData.closing ?? (todayData.opening + todayData.income - todayData.expense) ?? 0),
-        };
+// 🔥 Usar SIEMPRE res.data (solo datos del día de cierre)
+const sesiones = res.data.sessions || [];
+const movimientos = res.data.movements || [];
+const ventasTickets = res.data.sales || [];
+const creditNotesTotal = res.data.creditNotesTotal || 0;
 
-        setClosingSummary(resumen);
+// Apertura (suma de todas las aperturas del día)
+const apertura = sesiones.reduce(
+  (acc, s) => acc + Number(s.opening || s.opening_amount || 0),
+  0
+);
+
+// Ingresos (solo movimientos tipo ingreso)
+const ingresos = movimientos
+  .filter(m => m.type === "ingreso")
+  .reduce((acc, m) => acc + Number(m.amount || 0), 0);
+
+// Ventas reales (solo tickets de venta)
+const ventas = ventasTickets
+  .filter(s => (s.type || "").toLowerCase() === "venta")
+  .reduce((acc, s) => acc + Number(s.amount ?? s.total ?? 0), 0);
+
+// Egresos manuales (movimientos tipo egreso, sin comisiones)
+const egresosManuales = movimientos
+  .filter(m => m.type === "egreso" && !String(m.concept || "").startsWith("Comisión"))
+  .reduce((acc, m) => acc + Number(m.amount || 0), 0);
+
+// Comisiones del día
+const comisiones = movimientos
+  .filter(m => m.type === "commission")
+  .reduce((acc, m) => acc + Math.abs(Number(m.amount || 0)), 0);
+
+// 🔥 Egresos totales como en el Resumen Consolidado:
+// egresos manuales + notas de crédito (del backend) + comisiones
+const egresos = egresosManuales + creditNotesTotal + comisiones;
+
+// Total final del día (mismo criterio que totalGeneral del consolidado)
+const cierre = apertura + ingresos + ventas - egresos;
+
+setClosingSummary({
+  apertura,
+  ingresos,
+  egresos,
+  cierre,
+});
+        
         setShowCloseModal(true);
       } catch (err) {
         setMessage("Error al obtener resumen de cierre");
@@ -355,6 +393,18 @@ const handleExportPDF = async () => {
       Object.values(egresosPorConcepto).reduce((a, b) => a + b, 0) + totalNotasCredito;
     const totalGeneral = totalApertura + totalIngresos + totalVentas - totalEgresos;
 
+    // === COMISIONES DEL PERÍODO ===
+const commissions = (report.movements || []).filter(m => m.type === "commission");
+
+const commissionsByMethod = commissions.reduce((acc, m) => {
+  if (!acc[m.payment_method]) acc[m.payment_method] = 0;
+  acc[m.payment_method] += Math.abs(Number(m.amount || 0));
+  return acc;
+}, {});
+
+const totalComisionesPDF = Object.values(commissionsByMethod).reduce((a, b) => a + b, 0);
+const netoRealPDF = totalGeneral - totalComisionesPDF;
+
     drawRow(
       [
         "Totales generales",
@@ -368,6 +418,46 @@ const handleExportPDF = async () => {
       true,
       true
     );
+
+    // === SECCIÓN: COMISIONES ====================================
+if (totalComisionesPDF > 0) {
+  y += 5;
+  doc.setTextColor(200, 0, 0);
+  doc.setFontSize(11);
+  doc.text("Comisiones por método", startX, y);
+  y += lineHeight;
+  doc.setTextColor(0, 0, 0);
+  doc.setFontSize(9);
+
+  Object.entries(commissionsByMethod).forEach(([method, amount]) => {
+    drawRow([
+  `Comisión ${method.toUpperCase()}`,
+  "",
+  "",
+  "",
+  amount.toFixed(2),
+  ""
+]);
+
+  });
+
+  // Total comisiones
+  drawRow(
+    ["Total comisiones", "", "", "", totalComisionesPDF.toFixed(2), ""],
+    false,
+    true,
+    true
+  );
+
+  // Neto real del comercio
+  drawRow(
+    ["Neto real del comercio", "", "", "", "", netoRealPDF.toFixed(2)],
+    false,
+    true,
+    true
+  );
+}
+
 
     y += 5;
     doc.setFontSize(9);
@@ -396,23 +486,74 @@ const handleExportExcel = async () => {
 
     // ====== Encabezado ======
     worksheet.mergeCells("A1:F1");
-    worksheet.getCell("A1").value = "Resumen de Caja - Tienda Natural";
-    worksheet.getCell("A1").font = { bold: true, size: 14 };
-    worksheet.getCell("A1").alignment = { horizontal: "center" };
+    const titleCell = worksheet.getCell("A1");
+    titleCell.value = "Resumen de Caja - Tienda Natural";
+    titleCell.font = { bold: true, size: 16, color: { argb: "003300" } };
+    titleCell.alignment = { horizontal: "center", vertical: "middle" };
+    titleCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "E6FFE6" }
+    };
+
+    // 💥 Reforzar alineación sobre el rango completo
+    worksheet.getRow(1).alignment = { horizontal: "center", vertical: "middle" };
 
     const fechaReporte = getCurrentARTimestamp();
     const fechaCaja = session?.date || getCurrentARDate();
     const estadoCaja = session?.closed ? "CERRADA" : "ABIERTA";
 
     worksheet.mergeCells("A2:F2");
-    worksheet.getCell("A2").value = `Generado: ${fechaReporte} | Caja del ${fechaCaja} | Estado: ${estadoCaja}`;
-    worksheet.getCell("A2").alignment = { horizontal: "center" };
+    const subCell = worksheet.getCell("A2");
+    subCell.value = `Generado: ${fechaReporte} | Caja del ${fechaCaja} | Estado: ${estadoCaja}`;
+    subCell.font = { italic: true, color: { argb: "555555" } };
+    subCell.alignment = { horizontal: "center", vertical: "middle" };
+    subCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "F2FFF2" }
+    };
+
+    // 💥 Igual para la fila 2 completa
+    worksheet.getRow(2).alignment = { horizontal: "center", vertical: "middle" };
+
 
     // ====== Encabezados de tabla ======
-    // Reemplazamos "Fecha" por "Descripción" y mantenemos las demás columnas:
-    // Descripción | Apertura | Ingresos | Ventas | Egresos | Total
     worksheet.addRow(["Descripción", "Apertura", "Ingresos", "Ventas", "Egresos", "Total"]);
-    worksheet.getRow(3).font = { bold: true };
+    // ====== TAMAÑO ESPECÍFICO DE COLUMNAS ======
+    
+    worksheet.getColumn(1).width = 52; // Descripción (larga, para conceptos contables)
+    worksheet.getColumn(2).width = 18; // Apertura
+    worksheet.getColumn(3).width = 18; // Ingresos
+    worksheet.getColumn(4).width = 18; // Ventas
+    worksheet.getColumn(5).width = 18; // Egresos
+    worksheet.getColumn(6).width = 18; // Total
+
+    // Montos alineados a la derecha (como exige AFIP)
+    worksheet.getColumn(2).alignment = { horizontal: "right" };
+    worksheet.getColumn(3).alignment = { horizontal: "right" };
+    worksheet.getColumn(4).alignment = { horizontal: "right" };
+    worksheet.getColumn(5).alignment = { horizontal: "right" };
+    worksheet.getColumn(6).alignment = { horizontal: "right" };
+
+    // Descripción alineada a la izquierda
+    worksheet.getColumn(1).alignment = { horizontal: "left" };
+
+
+    worksheet.getRow(3).font = { bold: true, size: 12 };
+    worksheet.getRow(3).alignment = { horizontal: "center" };
+    worksheet.getRow(3).eachCell((c) => {
+      c.border = {
+        top: { style: "thin" }, bottom: { style: "thin" },
+        left: { style: "thin" }, right: { style: "thin" }
+      };
+      c.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "CCFFCC" },
+      };
+    });
+
 
     // ====== Agregaciones para el período ======
     const sesiones = report?.sessions || [];
@@ -432,15 +573,15 @@ const handleExportExcel = async () => {
       });
 
     // -- Ventas por método (acumuladas desde salesByMethod de cada sesión)
-    const ventasPorMetodo = {};
-    sesiones.forEach((s) => {
-      const vm = s.salesByMethod || {};
-      Object.keys(vm).forEach((met) => {
-        if (met !== "total") {
-          ventasPorMetodo[met] = (ventasPorMetodo[met] || 0) + Number(vm[met] || 0);
-        }
-      });
-    });
+    // ✔️ SOLO ventas reales (SIN notas de crédito)
+    const ventasPorMetodo = (report?.sales || [])
+      .filter(s => (s.type || "").toLowerCase() === "venta") // ← solo ventas
+      .reduce((acc, s) => {
+        const metodo = s.payment_method || "otros";
+        acc[metodo] = (acc[metodo] || 0) + Number(s.amount ?? s.total ?? 0);
+        return acc;
+      }, {});
+
 
     // -- Egresos agrupados por concepto
     const egresosPorConcepto = {};
@@ -456,90 +597,168 @@ const handleExportExcel = async () => {
       .filter((s) => (s.type || "").toLowerCase() === "nota_credito")
       .reduce((acc, s) => acc + Math.abs(Number(s.amount ?? s.total ?? 0)), 0);
 
-    // ====== Construcción de filas (1 fila por descripción) ======
-    const addRow = (descripcion, apertura = 0, ingreso = 0, venta = 0, egreso = 0) => {
-      const totalFila = Number(apertura || 0) + Number(ingreso || 0) + Number(venta || 0) + Number(egreso || 0);
+    // === COMISIONES ===
+    const commissionsXLS = (report.movements || []).filter(m => m.type === "commission");
+
+    const commissionsByMethodXLS = commissionsXLS.reduce((acc, m) => {
+      if (!acc[m.payment_method]) acc[m.payment_method] = 0;
+      acc[m.payment_method] += Math.abs(Number(m.amount || 0));
+      return acc;
+    }, {});
+
+    const totalComisionesXLS = Object.values(commissionsByMethodXLS).reduce((a, b) => a + b, 0);
+
+    // ====== FILAS EXACTAMENTE COMO LA TABLA RESUMEN CONSOLIDADO ======
+
+    const addRow = (descripcion, apertura = "", ingreso = "", venta = "", egreso = "") => {
       const row = worksheet.addRow([
         descripcion,
-        apertura ? Number(apertura).toFixed(2) : "",
-        ingreso ? Number(ingreso).toFixed(2) : "",
-        venta ? Number(venta).toFixed(2) : "",
-        egreso ? Number(egreso).toFixed(2) : "",
-        "",
+        apertura !== "" ? Number(apertura).toFixed(2) : "",
+        ingreso !== "" ? Number(ingreso).toFixed(2) : "",
+        venta !== "" ? Number(venta).toFixed(2) : "",
+        egreso !== "" ? Number(egreso).toFixed(2) : "",
+        ""
       ]);
-      row.eachCell((cell, colNumber) => {
-        cell.alignment = { wrapText: true, vertical: "top" };
-        if (colNumber > 1) {
-          // Alineamos montos al centro para una lectura más prolija
-          cell.alignment = { ...cell.alignment, horizontal: "center" };
-        }
-      });
+
+      // Bordes y alineación
+    row.eachCell((c, colNumber) => {
+      // ===== Bordes =====
+      c.border = {
+        top: { style: "thin" },
+        bottom: { style: "thin" },
+        left: { style: "thin" },
+        right: { style: "thin" }
+      };
+
+      // ===== Columna 1 (Descripción): Izquierda =====
+      if (colNumber === 1) {
+        c.alignment = {
+          horizontal: "left",
+          vertical: "middle",
+          wrapText: true
+        };
+        return;
+      }
+
+      // ===== Otras columnas: Formato CONTABLE AFIP =====
+      c.alignment = { horizontal: "right", vertical: "middle" };
+
+      // Si la celda tiene número → aplicar formato contable
+      if (!isNaN(Number(c.value)) && c.value !== "") {
+        c.numFmt = '"$" #,##0.00';   // ← FORMATO CONTABLE ARGENTINO
+      }
+    });
+
+
+      // Colorear según tipo
+      if (descripcion.toLowerCase().includes("comisión") ||
+          descripcion.toLowerCase().includes("nota de crédito")) {
+        row.eachCell((c) => {
+          c.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF0F0" } // rojo suave
+          };
+        });
+      }
     };
 
-    // 2.1) Fila de Apertura (si hubo)
-    if (totalApertura > 0) addRow("Apertura de caja", totalApertura, 0, 0, 0);
 
-    // 2.2) Filas de Ingresos (por concepto)
+    // 1) Apertura
+    addRow("Apertura de caja", totalApertura, "", "", "");
+
+    // 2) Ingresos por concepto
     Object.entries(ingresosPorConcepto).forEach(([concepto, monto]) => {
-      addRow(concepto, 0, monto, 0, 0);
+      addRow(concepto, "", monto, "", "");
     });
 
-    // 2.3) Filas de Ventas (por método)
-    Object.entries(ventasPorMetodo).forEach(([metodo, monto]) => {
-      addRow(`Venta - ${metodo}`, 0, 0, monto, 0);
-    });
+    // 3) Ventas por método
+    Object.entries(ventasPorMetodo)
+      .filter(([metodo, monto]) => typeof monto === "number" && metodo !== "total")
+      .forEach(([metodo, monto]) => {
+        addRow(`Venta - ${metodo}`, "", "", monto, "");
+      });
 
-    // 2.4) Filas de Egresos (por concepto)
+    // 4) Egresos por concepto
     Object.entries(egresosPorConcepto).forEach(([concepto, monto]) => {
-      addRow(concepto, 0, 0, 0, monto);
+      addRow(concepto, "", "", "", monto);
     });
 
-    // 2.5) Fila de Notas de crédito (si hubo)
-    if (totalNotasCredito > 0) addRow("Notas de crédito", 0, 0, 0, totalNotasCredito);
+    // 5) Notas de crédito
+    if (totalNotasCredito > 0) {
+      addRow("Notas de crédito", "", "", "", totalNotasCredito);
+    }
 
-    // ====== Ancho de columnas ======
-    worksheet.columns.forEach((col, idx) => {
-      col.width = idx === 0 ? 40 : 18; // Descripción más ancha
-    });
+    // 6) Comisiones por método (igual a tabla consolidada)
+    Object.entries(commissionsByMethodFooter)
+      .filter(([metodo, monto]) => typeof monto === "number" && monto !== 0)
+      .forEach(([metodo, monto]) => {
+        addRow(`Comisión ${metodo.toUpperCase()}`, "", "", "", monto);
+      });
 
-    // ====== Footer con totales ======
-    const totalIngresos = Object.values(ingresosPorConcepto).reduce((a, b) => a + b, 0);
-    const totalVentas = Object.values(ventasPorMetodo).reduce((a, b) => a + b, 0);
-    const totalEgresos =
-      Object.values(egresosPorConcepto).reduce((a, b) => a + b, 0) + totalNotasCredito;
-
-    const totalGeneral = totalApertura + totalIngresos + totalVentas - totalEgresos;
-
-    const footerRow = worksheet.addRow([
+    // ====== TOTALES (IGUAL A LA TABLA) ======
+    const totalRow = worksheet.addRow([
       "Totales",
       totalApertura.toFixed(2),
       totalIngresos.toFixed(2),
       totalVentas.toFixed(2),
-      totalEgresos.toFixed(2),
-      totalGeneral.toFixed(2),
+      totalEgresosConComisiones.toFixed(2),
+      totalGeneral.toFixed(2)
     ]);
-    footerRow.font = { bold: true };
-    footerRow.eachCell((cell) => {
-      cell.alignment = { wrapText: true, horizontal: "center", vertical: "top" };
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD6F5D6" } };
+    totalRow.font = { bold: true };
+    totalRow.eachCell((c) => {
+      c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "D4FFD4" } };
+      c.border = {
+        top: { style: "medium" },
+        bottom: { style: "medium" },
+        left: { style: "thin" },
+        right: { style: "thin" }
+      };
     });
 
-    // Comentario aclaratorio
-    const infoRow = worksheet.addRow([
-      "Nota: Los egresos incluyen las notas de crédito del período",
+    // ====== NETO REAL DEL COMERCIO ======
+    const netoRow = worksheet.addRow([
+      "Neto real del comercio",
+      "",
+      "",
+      "",
+      "",
+      totalGeneral.toFixed(2)
     ]);
-    infoRow.font = { italic: true, color: { argb: "FF555555" } };
-    infoRow.getCell(1).alignment = { wrapText: true };
-    worksheet.mergeCells(`A${infoRow.number}:F${infoRow.number}`);
+    netoRow.font = { bold: true };
+    netoRow.eachCell((c) => {
+      c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "CCE5FF" } };
+      c.border = {
+        top: { style: "medium" },
+        bottom: { style: "medium" },
+        left: { style: "thin" },
+        right: { style: "thin" }
+      };
+    });
 
-    // ====== Descargar XLSX ======
-    const buffer = await workbook.xlsx.writeBuffer();
-    saveAs(new Blob([buffer]), `Resumen_Caja_${getCurrentARDate()}.xlsx`);
-  } catch (err) {
-    console.error("Error al exportar Excel:", err);
-    alert("Error al exportar Excel. Revisa la consola.");
-  }
-};
+
+      // Comentario aclaratorio
+      const infoRow = worksheet.addRow([
+        "Nota: Los egresos incluyen las notas de crédito del período",
+      ]);
+      infoRow.font = { italic: true, color: { argb: "777777" } };
+      infoRow.alignment = { horizontal: "left" };
+
+      infoRow.getCell(1).alignment = { wrapText: true };
+      worksheet.mergeCells(`A${infoRow.number}:F${infoRow.number}`);
+
+      // ====== Descargar XLSX ======
+
+
+
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      saveAs(new Blob([buffer]), `Resumen_Caja_${getCurrentARDate()}.xlsx`);
+    } catch (err) {
+      console.error("Error al exportar Excel:", err);
+      alert("Error al exportar Excel. Revisa la consola.");
+    }
+  };
 
 const handlePreview = () => {
   if (!report?.sessions || report.sessions.length === 0) {
@@ -592,19 +811,26 @@ const displayRows = React.useMemo(() => {
   if (report?.movements?.length) {
     for (const m of report.movements) {
       rows.push({
-        _kind: "mov",
-        date: m.date,
-        type: m.type, // "ingreso" | "egreso"
-        concept: m.concept,
-        amount: Number(m.amount || 0),
-        payment_method: m.payment_method || "—",
-      });
+  _kind: "mov",
+  date: m.date,
+
+  // ✔ Si es una nota de crédito, convertirlo explícitamente
+  type: m.concept.startsWith("Nota de crédito")
+        ? "nota_credito"
+        : m.type,
+
+  concept: m.concept,
+  amount: Number(m.amount || 0),
+  payment_method: m.payment_method || "—",
+});
+
     }
   }
-    // 3) Filas de Tickets de Venta
+
   // 3) Filas de Tickets de Venta
 if (report?.sales?.length) {
   for (const s of report.sales) {
+    if ((s.type || "").toLowerCase() === "nota_credito") continue; // ← ya está en movimientos
     rows.push({
       _kind: "venta",
       date: s.date.slice(0, 10),
@@ -619,11 +845,147 @@ if (report?.sales?.length) {
 
   // 4) Orden simple por fecha 
 rows.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+// 🧮 COMISIONES: egresos cuyo concepto empieza por "Comisión ..."
+const commissionMovements =
+  report?.movements?.filter((m) => {
+    const concept = String(m.concept || "").trim().toLowerCase();
+    return m.type === "egreso" && concept.startsWith("comisión");
+  }) || [];
+
+
+// Agrupar comisiones por método
+const commissionsByMethod = commissionMovements.reduce((acc, mov) => {
+  const method = mov.payment_method || "desconocido";
+  acc[method] = (acc[method] || 0) + Math.abs(Number(mov.amount || 0));
+  return acc;
+}, {});
+
+// Total general de comisiones
+const totalCommissions = Object.values(commissionsByMethod).reduce(
+  (a, b) => a + b,
+  0
+);
+
+// Neto real del comercio = total sesiones - comisiones
+const netoReal =
+  report.sessions.reduce((a, r) => a + Number(r.total || 0), 0) -
+  totalCommissions;
+ 
 
    return rows;
 }, [report]);
 // 🔒 Bloquear funciones si hay pendiente y caja abierta
 const lock = pending && session && !session.closed;
+// === COMISIONES (para footer y resumen general) ===
+// 🔥 SI LA CAJA ESTÁ ABIERTA → traer comisiones desde sale_commissions (dinámicas)
+let commissionsByMethodFooter = {};
+let totalCommissions = 0;
+
+if (session && session.closed === 0) {
+  // Caja abierta → usar comisiones dinámicas
+  commissionsByMethodFooter = report.commissionsOpenByMethod 
+                           || report.commissionsDynamic 
+                           || {};
+
+  totalCommissions = report.commissionsOpenTotal 
+                  || report.commissionsDynamicTotal 
+                  || 0;
+
+} else {
+  // Caja cerrada → usar comisiones reales de cash_movements
+  const commissionMovementsFooter =
+    report?.movements?.filter((m) => {
+      const concept = String(m.concept || "").trim().toLowerCase();
+      return m.type === "egreso" && concept.startsWith("comisión");
+    }) || [];
+
+  commissionsByMethodFooter = commissionMovementsFooter.reduce((acc, mov) => {
+    const method = mov.payment_method || "desconocido";
+    acc[method] = (acc[method] || 0) + Math.abs(Number(mov.amount || 0));
+    return acc;
+  }, {});
+
+  totalCommissions = Object.values(commissionsByMethodFooter).reduce(
+    (a, b) => a + b,
+    0
+  );
+}
+
+
+const netoReal =
+  report.sessions.reduce((a, r) => a + Number(r.total || 0), 0) -
+  totalCommissions;
+
+// ===============================
+// 🟩 TOTALES CONSOLIDADOS (como Excel)
+// ===============================
+
+// Apertura total
+const totalApertura = report?.sessions?.reduce(
+  (acc, s) => acc + Number(s.opening || 0),
+  0
+);
+
+// Ingresos por concepto
+const ingresosPorConcepto = report?.movements
+  ?.filter(m => m.type === "ingreso")
+  .reduce((acc, m) => {
+    const c = m.concept || "Ingreso";
+    acc[c] = (acc[c] || 0) + Number(m.amount || 0);
+    return acc;
+  }, {}) || {};
+
+// Total ingresos
+const totalIngresos = Object.values(ingresosPorConcepto)
+  .reduce((a, b) => a + b, 0);
+
+// Ventas por método
+// 🔥 Ventas reales SIN notas de crédito
+// Solo ventas reales (sin notas de crédito)
+const ventasPorMetodo = (report?.sales || [])
+  .filter(s => s.type === "venta")
+  .reduce((acc, s) => {
+    const metodo = s.payment_method || "otros";
+    acc[metodo] = (acc[metodo] || 0) + Number(s.amount || s.total || 0);
+    return acc;
+  }, {});
+
+
+// Total real de ventas
+const totalVentas = Object.values(ventasPorMetodo)
+  .reduce((acc, v) => acc + Number(v || 0), 0);
+
+
+// Egresos por concepto
+const egresosPorConcepto = report?.movements
+  ?.filter(m => m.type === "egreso" && !String(m.concept).startsWith("Comisión"))
+  .reduce((acc, m) => {
+    const c = m.concept || "Egreso";
+    acc[c] = (acc[c] || 0) + Number(m.amount || 0);
+    return acc;
+  }, {}) || {};
+
+// Total egresos (sin comisiones)
+const totalEgresos = Object.values(egresosPorConcepto)
+  .reduce((a, b) => a + b, 0);
+
+// Total notas de crédito
+// Eliminar venta negativa que duplicaba la nota de crédito
+const ventasTickets = (report?.sales || []).filter(
+  (s) => (s.type || "").toLowerCase() !== "nota_credito_negativa"
+);
+
+const totalNotasCredito = report?.creditNotesTotal || 0;
+
+
+
+// Total egresos incluyendo comisiones
+const totalEgresosConComisiones = totalEgresos + totalCommissions + totalNotasCredito;
+
+// Total general (apertura + ingresos + ventas - todos los egresos)
+const totalGeneral =
+  totalApertura + totalIngresos + totalVentas - totalEgresosConComisiones;
+
 
 
   return (
@@ -728,7 +1090,7 @@ const lock = pending && session && !session.closed;
     <Button
       variant="success"
       onClick={fetchReport}
-      disabled={lock || loading}
+      //disabled={lock || loading}
       style={{ backgroundColor: "#28a745", borderColor: "#28a745" }}
     >
       {loading ? "Generando..." : "Generar"}
@@ -763,99 +1125,173 @@ const lock = pending && session && !session.closed;
 
   </div>
 </div>
+      {/* 🟦 BLOQUE: RESUMEN DE COMISIONES */}
+{report?.movements?.some(m => m.type === "commission") && (
+  <div className="card mb-4 shadow-sm border-danger">
+    <div className="card-header bg-danger text-white fw-bold">
+      Comisiones por método de pago
+    </div>
+    <div className="card-body">
+      <ul className="list-group">
+        {Object.entries(
+          report.movements
+            .filter(m => m.type === "commission")
+            .reduce((acc, m) => {
+              acc[m.payment_method] = (acc[m.payment_method] || 0) + Math.abs(Number(m.amount));
+              return acc;
+            }, {})
+        ).map(([method, amount], idx) => (
+          <li key={idx} className="list-group-item d-flex justify-content-between">
+            <span>{method.toUpperCase()}</span>
+            <span className="fw-bold text-danger">-${amount.toFixed(2)}</span>
+          </li>
+        ))}
+        <li className="list-group-item d-flex justify-content-between bg-light">
+          <strong>Total</strong>
+          <strong className="text-danger">
+            -$
+            {Object.values(
+              report.movements
+                .filter(m => m.type === "commission")
+                .reduce((a, m) => a + Math.abs(Number(m.amount || 0)), 0)
+            ).reduce((a, b) => a + b, 0).toFixed(2)}
+          </strong>
+        </li>
+      </ul>
+    </div>
+  </div>
+)}
+
 
       <h4>📊 Resumen de sesiones</h4>
-      <Table striped bordered hover>
-        <thead>
-          <tr>
-            <th>Fecha</th>
-            <th>Apertura</th>
-            <th>Ingresos</th>
-            <th colSpan="1" className="text-center">Ventas (por método)</th>
-            <th>Egresos</th>
-            
-            <th>Total</th>
-          </tr>
-        </thead>
+{/* 🟩 RESUMEN CONSOLIDADO (IGUAL AL EXCEL REAL) */}
+<div className="card mb-4 shadow-sm border-success">
+  <div className="card-header bg-success text-white fw-bold">
+    Resumen Consolidado de Caja
+  </div>
 
-        <tbody>
-          {report.sessions && report.sessions.length > 0 ? (
-            report.sessions.map((r, i) => {
-              const ventas = r.salesByMethod || {};
-              const metodos = Object.keys(ventas).filter(k => k !== 'total');
-              return (
-                <tr key={i}>
-                  <td>{r.date}</td>
-                  <td>${Number(r.opening).toFixed(2)}</td>
-                  <td>${Number(r.income).toFixed(2)}</td>
-                  <td>
-                    <div style={{ lineHeight: "1.3" }}>
-                      {metodos.length > 0 ? (
-                        metodos.map((m, idx) => (
-                          <div key={idx}>
-                            <strong>{m}:</strong> ${ventas[m].toFixed(2)}
-                          </div>
-                        ))
-                      ) : (
-                        <span>—</span>
-                      )}
-                      
-                    </div>
-                  </td>
-                  <td className="text-danger">${Number(r.expense).toFixed(2)}</td>
-                  
-                  <td className="fw-bold">${Number(r.total || 0).toFixed(2)}</td>
-                </tr>
-              );
-            })
-          ) : (
-            <tr>
-              <td colSpan={7} className="text-center">
-                No hay sesiones en el período seleccionado
-              </td>
-            </tr>
-          )}
-        </tbody>
-        <tfoot>
+  <div className="card-body">
+
+    <Table bordered hover size="sm" className="mb-4">
+      <thead className="table-light">
+        <tr>
+          <th>Descripción</th>
+          <th className="text-center">Apertura</th>
+          <th className="text-center">Ingresos</th>
+          <th className="text-center">Ventas</th>
+          <th className="text-center">Egresos</th>
+          <th className="text-center">Total</th>
+        </tr>
+      </thead>
+
+      <tbody>
+
+  {/* 🔹 APERTURA */}
+  <tr>
+    <td>Apertura de caja</td>
+    <td className="text-center">${totalApertura.toFixed(2)}</td>
+    <td></td><td></td><td></td><td></td>
+  </tr>
+
+  {/* 🔹 INGRESOS POR CONCEPTO */}
+  {Object.entries(ingresosPorConcepto).map(([concepto, monto], i) => (
+    <tr key={"ing-" + i}>
+      <td>{concepto}</td>
+      <td></td>
+      <td className="text-center text-success">${monto.toFixed(2)}</td>
+      <td></td>
+      <td></td>
+      <td></td>
+    </tr>
+  ))}
+
+  {/* 🔹 VENTAS POR MÉTODO */}
+{Object.entries(ventasPorMetodo)
+  .filter(([metodo, monto]) => typeof monto === "number" && metodo !== "total")
+  .map(([metodo, monto], i) => (
+    <tr key={"ven-" + i}>
+      <td>Venta - {metodo}</td>
+      <td></td>
+      <td></td>
+      <td className="text-center text-primary">${Number(monto).toFixed(2)}</td>
+      <td></td>
+      <td></td>
+    </tr>
+))}
+
+
+  {/* 🔹 EGRESOS POR CONCEPTO (sin comisiones) */}
+  {Object.entries(egresosPorConcepto).map(([concepto, monto], i) => (
+    <tr key={"egr-" + i}>
+      <td>{concepto}</td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td className="text-center text-danger">${monto.toFixed(2)}</td>
+      <td></td>
+    </tr>
+  ))}
+
+  {/* 🔹 NOTAS DE CRÉDITO */}
+  {totalNotasCredito > 0 && (
+    <tr>
+      <td>Notas de crédito</td>
+      <td></td><td></td><td></td>
+      <td className="text-center text-danger">${totalNotasCredito.toFixed(2)}</td>
+      <td></td>
+    </tr>
+  )}
+
+    {/* 🔹 COMISIONES POR MÉTODO (una fila por método de pago) */}
+  {Object.entries(commissionsByMethodFooter)
+    .filter(([metodo, monto]) => typeof monto === "number" && monto !== 0)
+    .map(([metodo, monto], i) => (
+      <tr key={"com-" + i}>
+        <td>Comisión {metodo.toUpperCase()}</td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td className="text-center text-danger">
+          ${Number(monto).toFixed(2)}
+        </td>
+        <td></td>
+      </tr>
+    ))}
+
+  
+
+
+</tbody>
+
+
+      {/* TOTALES (IGUAL AL EXCEL) */}
+      <tfoot>
+
+  {/* 🔹 TOTALES GENERALES (igual a Excel) */}
   <tr className="table-success fw-bold text-center">
     <td>Totales</td>
-    <td>
-      ${report.sessions.reduce((a, r) => a + Number(r.opening || 0), 0).toFixed(2)}
-    </td>
-    <td>
-      ${report.sessions.reduce((a, r) => a + Number(r.income || 0), 0).toFixed(2)}
-    </td>
-
-    {/* 🧩 Ventas: totales por método en el footer */}
-    <td>
-  <div style={{ lineHeight: "1.3" }}>
-    {(() => {
-      const metodoSuma = {};
-      report.sessions.forEach(s => {
-        const ventas = s.salesByMethod || {};
-        Object.keys(ventas).forEach(m => {
-          if (m !== "total") {
-            metodoSuma[m] = (metodoSuma[m] || 0) + Number(ventas[m] || 0);
-          }
-        });
-      });
-      const totalMetodos = Object.values(metodoSuma).reduce((a, b) => a + b, 0);
-      return <span className="fw-bold text-success">Total ventas: ${totalMetodos.toFixed(2)}</span>;
-    })()}
-  </div>
-</td>
-
-
-    <td className="text-danger">
-      ${report.sessions.reduce((a, r) => a + Number(r.expense || 0), 0).toFixed(2)}
-    </td>
-    <td>
-      ${report.sessions.reduce((a, r) => a + Number(r.total || 0), 0).toFixed(2)}
-    </td>
+    <td>${totalApertura.toFixed(2)}</td>
+    <td>${totalIngresos.toFixed(2)}</td>
+    <td>${totalVentas.toFixed(2)}</td>
+    <td>${totalEgresosConComisiones.toFixed(2)}</td>
+    <td>${totalGeneral.toFixed(2)}</td>
   </tr>
+
+  {/* 🔹 NETO REAL DEL COMERCIO */}
+<tr className="table-info fw-bold">
+  <td>Neto real del comercio</td>
+  <td colSpan="5" className="text-center">
+    ${totalGeneral.toFixed(2)}
+  </td>
+</tr>
+
+
 </tfoot>
 
-      </Table>
+    </Table>
+
+  </div>
+</div>
 
       {/* 🟢 MODAL: Apertura */}
       <Modal show={showOpenModal} onHide={() => setShowOpenModal(false)} centered>
@@ -971,26 +1407,31 @@ const lock = pending && session && !session.closed;
 
         {/* Columna Tipo: identifica cada tipo de movimiento */}
         <td
-        className={
-            r.type === "apertura"
-            ? "text-primary"
-            : r.type === "ingreso" || r.type === "venta"
-            ? "text-success"
-            : r.type === "nota_credito"
-            ? "text-danger"
-            : "text-danger"
-        }
-        >
-        {r.type === "apertura"
-            ? "Apertura"
-            : r.type === "venta"
-            ? "Venta"
-            : r.type === "nota_credito"
-            ? "Nota de Crédito"
-            : r.type === "ingreso"
-            ? "Ingreso"
-            : "Egreso"}
-        </td>
+  className={
+    r.type === "apertura"
+      ? "text-primary"
+      : r.type === "ingreso" || r.type === "venta"
+      ? "text-success"
+      : r.type === "nota_credito"
+      ? "text-danger"
+      : r.type === "commission"
+      ? "text-danger fw-bold"
+      : "text-danger"
+  }
+>
+  {r.type === "apertura"
+    ? "Apertura"
+    : r.type === "venta"
+    ? "Venta"
+    : r.type === "nota_credito"
+    ? "Nota de Crédito"
+    : r.type === "commission"
+    ? "Comisión"
+    : r.type === "ingreso"
+    ? "Ingreso"
+    : "Egreso"}
+</td>
+
 
 
         {/* Concepto */}
@@ -1005,13 +1446,10 @@ const lock = pending && session && !session.closed;
 
         {/* Egreso: se muestran solo Egresos y Notas de crédito */}
         <td className="text-danger fw-bold">
-        {["egreso", "nota_credito"].includes(r.type)
+          {["egreso", "nota_credito", "commission"].includes(r.type)
             ? `-$${Math.abs(r.amount).toFixed(2)}`
             : "—"}
         </td>
-
-
-
         {/* Método */}
         <td>{r.payment_method}</td>
         

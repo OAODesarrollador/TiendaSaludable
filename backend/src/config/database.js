@@ -76,8 +76,24 @@ async function autoMigrate() {
     ],
     category_coefficients: [
       { name: 'coefficient', type: 'REAL DEFAULT 1.0' }
+    ],
+        sale_commissions: [
+      { name: 'payment_method', type: "TEXT" },
+      { name: 'base_amount', type: "REAL DEFAULT 0" },
+      { name: 'commission_rate', type: "REAL DEFAULT 0" },
+      { name: 'commission_amount', type: "REAL DEFAULT 0" },
+      { name: 'created_at', type: "DATETIME DEFAULT CURRENT_TIMESTAMP" }
+    ],
+    cash_movements: [
+      { name: 'type', type: "TEXT" },
+      { name: 'concept', type: "TEXT" },
+      { name: 'payment_method', type: "TEXT" },
+      { name: 'user_id', type: "INTEGER" },
+      { name: 'created_at', type: "DATETIME DEFAULT CURRENT_TIMESTAMP" },
+      { name: 'date', type: "TEXT" }
     ]
   };
+
 
   for (const [table, columns] of Object.entries(tablesToMigrate)) {
     const existingCols = await allAsync(`PRAGMA table_info(${table})`);
@@ -169,6 +185,38 @@ const initialize = () => {
         coefficient REAL DEFAULT 1.0
       )
     `);
+
+    // Tabla de comisiones por venta
+db.run(`
+  CREATE TABLE IF NOT EXISTS sale_commissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sale_id INTEGER NOT NULL,
+    payment_method TEXT NOT NULL,
+    base_amount REAL NOT NULL,
+    commission_rate REAL NOT NULL,
+    commission_amount REAL NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE
+  )
+`);
+// Tabla de movimientos de caja
+// Tabla de movimientos de caja
+db.run(`
+  CREATE TABLE IF NOT EXISTS cash_movements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    type TEXT NOT NULL,                       -- 'ingreso', 'egreso', 'commission'
+    concept TEXT NOT NULL,
+    amount REAL NOT NULL,                     -- positivo = ingreso, negativo = egreso
+    payment_method TEXT,
+    user_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    date TEXT,
+    FOREIGN KEY (session_id) REFERENCES cash_sessions(id) ON DELETE CASCADE
+  )
+`);
+
+
 
     console.log('✅ Tablas inicializadas correctamente');
 

@@ -63,16 +63,18 @@ await runAsync(`
   CREATE TABLE IF NOT EXISTS cash_movements (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id INTEGER NOT NULL,
-    type TEXT CHECK(type IN ('ingreso','egreso')) NOT NULL,
+    type TEXT NOT NULL,
     concept TEXT NOT NULL,
     amount REAL NOT NULL,
     payment_method TEXT,
     user_id INTEGER,
     created_at TEXT NOT NULL,
-    FOREIGN KEY (session_id) REFERENCES cash_sessions(id),
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    date TEXT,
+    FOREIGN KEY (session_id) REFERENCES cash_sessions(id)
   )
 `);
+
+
 }
 ensureCashTables();
 // --------------------------------------------
@@ -200,33 +202,89 @@ const addCashMovement = async (req, res) => {
 // --------------------------------------------
 // Helpers públicos para ventas / devoluciones
 // --------------------------------------------
-async function recordSaleIncome({ total, payment_method = 'efectivo', user_id, sale_id }) {
+
+async function recordSaleIncome({ total, sale_id, payment_method, user_id }) {
   const session = await getOpenSession();
   if (!session) {
-    // Política: bloquear si no hay sesión abierta
-    throw new Error('No hay caja abierta hoy. Debe abrir caja antes de registrar ventas.');
+    throw new Error(
+      'No hay caja abierta hoy. Debe abrir caja antes de registrar ingresos de ventas.'
+    );
   }
-  
-  await runAsync(
-    `INSERT INTO cash_movements (session_id, type, concept, amount, payment_method, user_id, created_at)
-    VALUES (?, 'ingreso', ?, ?, ?, ?, ?)`,
-    [session.id, `Venta #${sale_id}`, Number(total), payment_method, user_id || null, fechaAR]
-  );
 
+  const fechaAR = getCurrentARTimestamp();
+
+  await runAsync(
+    `INSERT INTO cash_movements (session_id, type, concept, amount, payment_method, user_id, created_at, date)
+     VALUES (?, 'ingreso', ?, ?, ?, ?, ?, ?)`,
+    [
+      session.id,
+      `Venta #${sale_id}`,
+      Math.abs(Number(total)),
+      payment_method || null,
+      user_id || null,
+      fechaAR,
+      session.date,
+    ]
+  );
 }
 
 async function recordRefundExpense({ total, sale_id, refund_id, user_id }) {
   const session = await getOpenSession();
   if (!session) {
-    throw new Error('No hay caja abierta hoy. Debe abrir caja antes de registrar notas de crédito.');
+    throw new Error(
+      'No hay caja abierta hoy. Debe abrir caja antes de registrar notas de crédito.'
+    );
   }
-  
-  await runAsync(
-    `INSERT INTO cash_movements (session_id, type, concept, amount, payment_method, user_id, created_at)
-    VALUES (?, 'egreso', ?, ?, ?, ?, ?)`,
-    [session.id, `Nota de crédito #${refund_id} (Venta #${sale_id})`, Math.abs(Number(total)), 'efectivo', user_id || null, fechaAR]
-  );
 
+  const fechaAR = getCurrentARTimestamp();
+
+  await runAsync(
+    `INSERT INTO cash_movements (session_id, type, concept, amount, payment_method, user_id, created_at, date)
+     VALUES (?, 'egreso', ?, ?, ?, ?, ?, ?)`,
+    [
+      session.id,
+      `Nota de crédito #${refund_id} (Venta #${sale_id})`,
+      Math.abs(Number(total)),
+      'efectivo',
+      user_id || null,
+      fechaAR,
+      session.date,
+    ]
+  );
+}
+
+// ✅ NUEVO: registrar comisión de venta como egreso en caja, en tiempo real
+async function recordCommissionExpense({
+  commission_amount,
+  payment_method,
+  sale_id,
+  user_id,
+}) {
+  const session = await getOpenSession();
+  if (!session) {
+    throw new Error(
+      'No hay caja abierta hoy. Debe abrir caja antes de registrar comisiones.'
+    );
+  }
+
+  const monto = Math.abs(Number(commission_amount || 0));
+  if (!monto) return; // si la comisión es 0, no insertamos nada
+
+  const fechaAR = getCurrentARTimestamp();
+
+  await runAsync(
+    `INSERT INTO cash_movements (session_id, type, concept, amount, payment_method, user_id, created_at, date)
+     VALUES (?, 'egreso', ?, ?, ?, ?, ?, ?)`,
+    [
+      session.id,
+      `Comisión ${String(payment_method || '').toUpperCase()}`,
+      monto,
+      payment_method || null,
+      user_id || null,
+      fechaAR,
+      session.date,
+    ]
+  );
 }
 
 // --------------------------------------------
@@ -253,9 +311,11 @@ const closeCashSession = async (req, res) => {
     await runAsync(
       `UPDATE cash_sessions
       SET total_income = ?, total_expense = ?, closing_amount = ?, carried_balance = ?, closed = 1, closed_at = ?
-      WHERE id = ?`,
-      [income, expense, closing, closing, fechaCierreAR, session.id]
+      WHERE id = ?`,      
+      [income, expense, closing, closing, fechaCierreAR, session.id],
     );
+    
+    
 
     const closed = await getAsync(`SELECT * FROM cash_sessions WHERE id = ?`, [session.id]);
     session.closed_at = fechaCierreAR;
@@ -361,17 +421,17 @@ async function queryCashRange({ start, end }) {
   return { sessions, movements };
 }
 
-
-
-
 const getCashReport = async (req, res) => {
   try {
     const { period, start_date, end_date, format } = req.query;
+
+    // 1) Rango de fechas
     const range = buildPeriodRange({ period, start_date, end_date });
     const { sessions, movements } = await queryCashRange(range);
-    // 🧾 Obtener tickets de venta dentro del rango
-    // 🔹 Obtener ventas y notas de crédito como movimientos contables
-    const sales = await allAsync(`
+
+    // 2) Ventas + Notas de crédito dentro del rango
+    const sales = await allAsync(
+      `
       SELECT 
         s.id,
         DATE(s.created_at) AS date,
@@ -379,7 +439,7 @@ const getCashReport = async (req, res) => {
         s.payment_method,
         'venta' AS type
       FROM sales s
-      WHERE date(s.created_at) BETWEEN ? AND ?
+      WHERE DATE(s.created_at) BETWEEN ? AND ?
       
       UNION ALL
       
@@ -390,27 +450,37 @@ const getCashReport = async (req, res) => {
         'nota de crédito' AS payment_method,
         'nota_credito' AS type
       FROM refunds r
-      WHERE date(r.created_at) BETWEEN ? AND ?
-     
+      WHERE DATE(r.created_at) BETWEEN ? AND ?
+      
       ORDER BY date ASC
-    `, [range.start, range.end, range.start, range.end]);
+    `,
+      [range.start, range.end, range.start, range.end]
+    );
 
-    // ==== Live totals for open sessions ====
-
+    // 3) Totales de movimientos por sesión (ingresos / egresos)
     const liveBySession = {};
     for (const m of movements) {
       const sid = m.session_id;
-      if (!liveBySession[sid]) liveBySession[sid] = { income: 0, expense: 0 };
-      if (m.type === 'ingreso') liveBySession[sid].income += Number(m.amount || 0);
-      if (m.type === 'egreso')  liveBySession[sid].expense += Number(m.amount || 0);
+      if (!liveBySession[sid]) {
+        liveBySession[sid] = { income: 0, expense: 0 };
+      }
+
+      if (m.type === "ingreso") {
+        liveBySession[sid].income += Number(m.amount || 0);
+      }
+
+      // Comisiones, notas de crédito y otros egresos ya vienen como "egreso"
+      if (m.type === "egreso") {
+        liveBySession[sid].expense += Number(m.amount || 0);
+      }
     }
 
-    // 🔹 Calcular totales de ventas y notas de crédito
-    // 🔹 Calcular totales de ventas discriminados por método de pago
+    // 4) Totales de ventas por día y método de pago
     const salesTotals = {};
     for (const s of sales) {
       const d = s.date.slice(0, 10);
-      const metodo = (s.payment_method || 'sin_especificar').toLowerCase();
+      const metodo = (s.payment_method || "sin_especificar").toLowerCase();
+
       if (!salesTotals[d]) salesTotals[d] = { total: 0 };
       if (!salesTotals[d][metodo]) salesTotals[d][metodo] = 0;
 
@@ -418,84 +488,147 @@ const getCashReport = async (req, res) => {
       salesTotals[d].total += Number(s.amount || 0);
     }
 
+    // 5) Comisiones desde sale_commissions para sesiones ABIERTAS
+    const openSessionDates = new Set(
+      sessions
+        .filter((s) => s.closed === 0)
+        .map((s) => toISODate(s.date))
+    );
 
-    // 🔹 Generar resumen por sesión
+    let commissionsOpenByMethod = {};
+    let commissionsOpenTotal = 0;
 
-    const summary = sessions.map(s => {
+    if (openSessionDates.size > 0) {
+      try {
+        const commissionRows = await allAsync(
+          `
+          SELECT 
+            DATE(s.created_at)        AS date,
+            sc.payment_method         AS payment_method,
+            SUM(sc.commission_amount) AS total_commission
+          FROM sale_commissions sc
+          JOIN sales s ON sc.sale_id = s.id
+          WHERE DATE(s.created_at) BETWEEN ? AND ?
+          GROUP BY DATE(s.created_at), sc.payment_method
+        `,
+          [range.start, range.end]
+        );
+
+        for (const row of commissionRows) {
+          const day = toISODate(row.date);
+
+          // Solo considerar días con caja ABIERTA
+          if (!openSessionDates.has(day)) continue;
+
+          const method = (row.payment_method || "otros").toLowerCase();
+          const amount = Number(row.total_commission || 0);
+          if (!amount) continue;
+
+          if (!commissionsOpenByMethod[method]) {
+            commissionsOpenByMethod[method] = 0;
+          }
+          commissionsOpenByMethod[method] += amount;
+          commissionsOpenTotal += amount;
+        }
+      } catch (err) {
+        console.error("getCashReport - error obteniendo sale_commissions:", err);
+        // Si falla (por ejemplo, no existe la tabla), no tiramos 500; solo dejamos comisiones en 0
+        commissionsOpenByMethod = {};
+        commissionsOpenTotal = 0;
+      }
+    }
+
+    // 6) Resumen por sesión (base contable)
+    const summary = sessions.map((s) => {
       const live = liveBySession[s.id] || { income: 0, expense: 0 };
-      const opening = Number(s.opening_amount || 0);
-      const income  = s.closed ? Number(s.total_income || 0)  : live.income;
-      let expense = s.closed ? Number(s.total_expense || 0) : live.expense;
 
-      // 🧾 Agregar al gasto los importes de notas de crédito del mismo día
-      const refundsOfDay = sales.filter(x => x.type === 'nota_credito' && x.date === s.date);
-      const refundsTotal = refundsOfDay.reduce((acc, r) => acc + Math.abs(Number(r.amount || 0)), 0);
+      const opening = Number(s.opening_amount || 0);
+      const income = live.income;
+      let expense = live.expense;
+
+      // Sumar notas de crédito del mismo día como egreso adicional
+      const refundsOfDay = sales.filter(
+        (x) => x.type === "nota_credito" && x.date === s.date
+      );
+      const refundsTotal = refundsOfDay.reduce(
+        (acc, r) => acc + Math.abs(Number(r.amount || 0)),
+        0
+      );
       expense += refundsTotal;
 
+      // Ventas de ese día (incluye total por método)
       const daySales = salesTotals[s.date] || {};
       const salesTotal = daySales.total || 0;
-      const closing = s.closed
-        ? Number(s.closing_amount ?? opening)
-        : opening + income + salesTotal - expense;
+
+      // Cierre contable del día
+      const closing = opening + income + salesTotal - expense;
 
       return {
         date: s.date,
         opening,
         income,
-        expense,
+        expense,          // ingresos menos egresos reales (incluye comisiones + NC)
         salesTotal,
-        salesByMethod: daySales, // 🟢 nuevo campo
+        salesByMethod: daySales,
         closing,
-        total: opening + income + salesTotal - expense
+        total: closing,
       };
     });
 
-
-    // =======================================
-    
-
-    if (format === 'csv') {
+    // 7) Formatos CSV / PDF (igual que antes)
+    if (format === "csv") {
       const parser = new Parser({
         fields: [
-          { label: 'Fecha', value: row => toLatinoDate(row.date) },
-          { label: 'Apertura', value: 'opening' },
-          { label: 'Ingresos', value: 'income' },
-          { label: 'Egresos', value: 'expense' },
-          { label: 'Cierre', value: 'closing' },
-        ]
+          { label: "Fecha", value: (row) => toLatinoDate(row.date) },
+          { label: "Apertura", value: "opening" },
+          { label: "Ingresos", value: "income" },
+          { label: "Egresos", value: "expense" },
+          { label: "Cierre", value: "closing" },
+        ],
       });
       const csv = parser.parse(summary);
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename=cash_${Date.now()}.csv`);
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename=cash_${Date.now()}.csv`
+      );
       return res.send(csv);
     }
 
-    if (format === 'pdf') {
-      const doc = new PDFDocument({ margin: 40, size: 'A4' });
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename=cash_${Date.now()}.pdf`);
+    if (format === "pdf") {
+      const doc = new PDFDocument({ margin: 40, size: "A4" });
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename=cash_${Date.now()}.pdf`
+      );
       doc.pipe(res);
 
-      doc.fontSize(16).text('Reporte de Caja', { align: 'center' });
-      doc.fontSize(10).text(`Período: ${toLatinoDate(range.start)} a ${toLatinoDate(range.end)}`, { align: 'center' });
+      doc.fontSize(16).text("Reporte de Caja", { align: "center" });
+      doc
+        .fontSize(10)
+        .text(
+          `Período: ${toLatinoDate(range.start)} a ${toLatinoDate(range.end)}`,
+          { align: "center" }
+        );
       doc.moveDown();
 
-      doc.fontSize(11).text('Resumen diario:', { underline: true });
+      doc.fontSize(11).text("Resumen diario:", { underline: true });
       doc.moveDown(0.5);
 
-      const headers = ['Fecha', 'Apertura', 'Ingresos', 'Egresos', 'Cierre'];
+      const headers = ["Fecha", "Apertura", "Ingresos", "Egresos", "Cierre"];
       const widths = [90, 90, 90, 90, 90];
       let x = doc.x;
       let y = doc.y;
-      doc.font('Helvetica-Bold').fontSize(9);
+      doc.font("Helvetica-Bold").fontSize(9);
       headers.forEach((h, i) => {
-        doc.text(h, x, y, { width: widths[i], align: 'center' });
+        doc.text(h, x, y, { width: widths[i], align: "center" });
         x += widths[i];
       });
       doc.moveDown(0.8);
-      doc.font('Helvetica').fontSize(9);
+      doc.font("Helvetica").fontSize(9);
 
-      summary.forEach(r => {
+      summary.forEach((r) => {
         const row = [
           toLatinoDate(r.date),
           `$${r.opening.toFixed(2)}`,
@@ -506,42 +639,127 @@ const getCashReport = async (req, res) => {
         let x0 = doc.x;
         const y0 = doc.y;
         row.forEach((txt, i) => {
-          doc.text(String(txt), x0, y0, { width: widths[i], align: 'center' });
+          doc.text(String(txt), x0, y0, { width: widths[i], align: "center" });
           x0 += widths[i];
         });
         doc.moveDown(0.4);
       });
 
       doc.addPage();
-      doc.fontSize(11).text('Movimientos:', { underline: true });
+      doc.fontSize(11).text("Movimientos:", { underline: true });
       doc.moveDown(0.5);
-      movements.forEach(m => {
-        doc.text(`${toLatinoDate(m.date)} | ${m.type.toUpperCase()} | $${Number(m.amount).toFixed(2)} | ${m.concept}${m.payment_method ? ' | ' + m.payment_method : ''}`);
+      movements.forEach((m) => {
+        doc.text(
+          `${toLatinoDate(m.date)} | ${m.type.toUpperCase()} | $${Number(
+            m.amount
+          ).toFixed(2)} | ${m.concept}${
+            m.payment_method ? " | " + m.payment_method : ""
+          }`
+        );
       });
 
       doc.end();
       return;
     }
-    
-    return res.json({ range, sessions: summary, summary, movements, sales });
 
-    } catch (err) {
-    console.error('getCashReport:', err);
-    return res.status(500).json({ error: 'Error al generar reporte de caja' });
+    // 8) Respuesta JSON por defecto (para React)
+    return res.json({
+      range,
+      sessions: summary,
+      summary,
+      movements,
+      sales,
+      salesTotals,
+      commissionsOpenByMethod,
+      commissionsOpenTotal,
+    });
+  } catch (err) {
+    console.error("getCashReport:", err);
+    return res
+      .status(500)
+      .json({ error: "Error al generar reporte de caja" });
   }
-
 };
 
+
+
+
+// ======================================================================
+// REGISTRAR EGRESOS DE COMISIONES AL CERRAR UNA SESIÓN DE CAJA
+// ======================================================================
+async function registerCommissionsForCashSession(sessionId) {
+  try {
+    console.log("🔍 Procesando comisiones para la sesión:", sessionId);
+
+    // Traemos la fecha de la sesión para definir el día de trabajo
+    const session = await getAsync(
+      `SELECT id, date FROM cash_sessions WHERE id = ?`,
+      [sessionId]
+    );
+
+    if (!session) {
+      console.warn("⚠️ Sesión no encontrada:", sessionId);
+      return;
+    }
+
+    // Trabajamos a nivel día completo
+    const start = `${session.date} 00:00:00`;
+    const end   = `${session.date} 23:59:59`;
+
+    const commissions = await allAsync(
+      `
+        SELECT sc.payment_method,
+               SUM(sc.commission_amount) AS total_commission
+        FROM sale_commissions sc
+        JOIN sales s ON sc.sale_id = s.id
+        WHERE s.created_at BETWEEN ? AND ?
+        GROUP BY sc.payment_method
+      `,
+      [start, end]
+    );
+
+    if (!commissions || commissions.length === 0) {
+      console.log("ℹ️ No hay comisiones para registrar en esta sesión.");
+      return;
+    }
+
+    for (const c of commissions) {
+      const total = Number(c.total_commission || 0);
+      if (total <= 0) continue;
+
+      await runAsync(
+        `
+          INSERT INTO cash_movements 
+          (session_id, type, concept, amount, payment_method, created_at)
+          VALUES (?, 'egreso', ?, ?, ?, ?)
+        `,
+        [
+          sessionId,
+          `Comisión ${String(c.payment_method || "").toUpperCase()}`,
+          total,                        // 👉 monto POSITIVO
+          c.payment_method || null,
+          fechaAR,                      // 👉 mismo timestamp AR que el resto
+        ]
+      );
+
+      console.log(`🧾 Comisión registrada: ${c.payment_method} → $${total}`);
+    }
+  } catch (error) {
+    console.error("❌ Error registrando comisiones:", error);
+  }
+}
+
+
 module.exports = {
-  // API
   openCashSession,
   addCashMovement,
   closeCashSession,
   getTodaySession,
   getPendingCloseWarning,
   getCashReport,
-  // helpers para ventas / devoluciones
   recordSaleIncome,
   recordRefundExpense,
-  ensureCashTables
+  recordCommissionExpense,
+  ensureCashTables,
 };
+
