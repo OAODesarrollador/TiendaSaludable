@@ -5,6 +5,7 @@ const axios = require('axios');
 
 const { Parser } = require('json2csv');
 const PDFDocument = require('pdfkit');
+const ExcelJS = require('exceljs');
 const { allAsync } = require('../config/database'); // mantiene tu helper existente
 //const { exportToCSV, exportToPDF } = require("../utils/exportHelpers"); 
 
@@ -44,6 +45,186 @@ const toLatinoDate = (d) => {
   const year = dt.getFullYear();
   return `${day}-${month}-${year}`;
 };
+
+async function sendWorkbook(res, workbook, fileName) {
+  res.setHeader(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  );
+  res.setHeader('Content-Disposition', `attachment; filename=${fileName}`);
+  await workbook.xlsx.write(res);
+  res.end();
+}
+
+function autoFitColumns(worksheet, minimumWidth = 12) {
+  worksheet.columns.forEach((column) => {
+    if (column.width) return;
+
+    let maxLength = minimumWidth;
+    column.eachCell({ includeEmpty: true }, (cell) => {
+      const value = cell.value == null ? '' : String(cell.value);
+      maxLength = Math.max(maxLength, value.length + 2);
+    });
+    column.width = Math.min(maxLength, 36);
+  });
+}
+
+function buildProfessionalWorkbook({ title, subtitle, columns, rows, summaryRows = [] }) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Tienda Natural';
+  workbook.created = new Date();
+
+  const worksheet = workbook.addWorksheet('Reporte', {
+    views: [{ state: 'frozen', ySplit: 4 }]
+  });
+
+  const lastColumn = String.fromCharCode(64 + columns.length);
+
+  worksheet.mergeCells(`A1:${lastColumn}1`);
+  worksheet.getCell('A1').value = title;
+  worksheet.getCell('A1').font = { size: 16, bold: true, color: { argb: 'FFFFFFFF' } };
+  worksheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'center' };
+  worksheet.getCell('A1').fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: '1F4E78' }
+  };
+
+  worksheet.mergeCells(`A2:${lastColumn}2`);
+  worksheet.getCell('A2').value = subtitle;
+  worksheet.getCell('A2').font = { size: 10, color: { argb: 'FF44546A' } };
+  worksheet.getCell('A2').alignment = { vertical: 'middle', horizontal: 'center' };
+
+  const resolvedColumns = columns.map((column) => {
+    const key = String(column.key || '').toLowerCase();
+    const header = String(column.header || '').toLowerCase();
+    const label = `${key} ${header}`;
+
+    let width = column.width;
+    if (!width) {
+      if (label.includes('nombre') || label.includes('producto')) width = 42;
+      else if (label.includes('categoria')) width = 15;
+      else if (label.includes('proveedor')) width = 22;
+      else if (label.includes('metodo')) width = 18;
+      else if (label.includes('fecha') || label.includes('venc')) width = 14;
+      else if (label.includes('sku')) width = 12;
+      else if (label.includes('ean')) width = 16;
+      else if (label.includes('stock')) width = 8;
+      else if (label.includes('precio') || label.includes('total') || label.includes('importe') || label.includes('descuento') || label.includes('debe') || label.includes('haber')) width = 16;
+      else width = 14;
+    }
+
+    let alignment = column.alignment;
+    if (!alignment) {
+      if (label.includes('precio') || label.includes('total') || label.includes('importe') || label.includes('descuento') || label.includes('debe') || label.includes('haber') || label.includes('stock') || label.includes('cantidad')) {
+        alignment = { horizontal: 'right', vertical: 'middle' };
+      } else if (label.includes('fecha') || label.includes('venc') || label.includes('sku') || label.includes('ean') || label.includes('id')) {
+        alignment = { horizontal: 'center', vertical: 'middle' };
+      } else {
+        alignment = { horizontal: 'left', vertical: 'middle' };
+      }
+    }
+
+    let numFmt = column.numFmt;
+    if (!numFmt) {
+      if (label.includes('precio') || label.includes('total') || label.includes('importe') || label.includes('descuento') || label.includes('debe') || label.includes('haber')) {
+        numFmt = '$ #,##0.00';
+      } else if (label.includes('stock') || label.includes('cantidad')) {
+        numFmt = '#,##0.00';
+      }
+    }
+
+    return {
+      ...column,
+      width,
+      numFmt,
+      style: {
+        ...(column.style || {}),
+        alignment
+      }
+    };
+  });
+
+  worksheet.columns = resolvedColumns;
+  worksheet.addRow({});
+  const headerRow = worksheet.addRow(columns.map((column) => column.header));
+  headerRow.height = 24;
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: '2F75B5' }
+    };
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FFD9E2F3' } },
+      left: { style: 'thin', color: { argb: 'FFD9E2F3' } },
+      bottom: { style: 'thin', color: { argb: 'FFD9E2F3' } },
+      right: { style: 'thin', color: { argb: 'FFD9E2F3' } }
+    };
+  });
+
+  rows.forEach((rowData, index) => {
+    const row = worksheet.addRow(rowData);
+    row.height = 20;
+    row.eachCell((cell) => {
+      cell.border = {
+        top: { style: 'thin', color: { argb: 'FFE5E5E5' } },
+        left: { style: 'thin', color: { argb: 'FFE5E5E5' } },
+        bottom: { style: 'thin', color: { argb: 'FFE5E5E5' } },
+        right: { style: 'thin', color: { argb: 'FFE5E5E5' } }
+      };
+      if (index % 2 === 0) {
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFF8FBFF' }
+        };
+      }
+      cell.alignment = {
+        ...(cell.alignment || {}),
+        vertical: 'middle',
+        wrapText: true
+      };
+      if (cell.numFmt) {
+        cell.numFmt = cell.numFmt;
+      }
+    });
+  });
+
+  if (summaryRows.length > 0) {
+    worksheet.addRow({});
+    summaryRows.forEach(([label, value]) => {
+      const row = worksheet.addRow([label, value]);
+      row.height = 20;
+      row.getCell(1).font = { bold: true };
+      row.getCell(1).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE2F0D9' }
+      };
+      row.getCell(2).font = { bold: true };
+      row.getCell(2).alignment = { horizontal: 'right', vertical: 'middle' };
+      row.eachCell((cell) => {
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFC6E0B4' } },
+          left: { style: 'thin', color: { argb: 'FFC6E0B4' } },
+          bottom: { style: 'thin', color: { argb: 'FFC6E0B4' } },
+          right: { style: 'thin', color: { argb: 'FFC6E0B4' } }
+        };
+      });
+    });
+  }
+
+  worksheet.autoFilter = {
+    from: { row: 4, column: 1 },
+    to: { row: 4, column: columns.length }
+  };
+
+  autoFitColumns(worksheet);
+  return workbook;
+}
 
 // ========================= Builders de consultas =========================
 // Ventas: arma SQL + params según req.query
@@ -441,6 +622,59 @@ const exportToCSV = async (req, res) => {
   }
 };
 
+const exportToExcel = async (req, res) => {
+  try {
+    const { sql, params, period } = buildLedgerQuery(req.query);
+    const rows = await allAsync(sql, params);
+    if (!rows.length) {
+      return res.status(404).json({ error: 'No hay datos para exportar.' });
+    }
+
+    const toNumber = (v) => (v == null ? 0 : Number(v) || 0);
+    const workbook = buildProfessionalWorkbook({
+      title: 'Reporte de Ventas - Libro Mayor',
+      subtitle: `Período: ${req.query.period === 'custom' ? `${toLatinoDate(req.query.start_date)} a ${toLatinoDate(req.query.end_date)}` : (req.query.period || period)} | Generado: ${new Date().toLocaleString('es-AR')}`,
+      columns: [
+        { header: 'Fecha', key: 'fecha' },
+        { header: 'Tipo', key: 'tipo' },
+        { header: 'ID Venta', key: 'id_venta' },
+        { header: 'Producto', key: 'producto' },
+        { header: 'Cantidad', key: 'cantidad' },
+        { header: 'Precio Unit.', key: 'precio_unitario' },
+        { header: 'Importe', key: 'importe' },
+        { header: 'Descuento', key: 'descuento' },
+        { header: 'Debe', key: 'debe' },
+        { header: 'Haber', key: 'haber' },
+        { header: 'Método Pago', key: 'metodo_pago' }
+      ],
+      rows: rows.map((r) => ({
+        fecha: toLatinoDate(r.created_at),
+        tipo: r.entry_type === 'REFUND' ? 'NOTA DE CRÉDITO' : 'VENTA',
+        id_venta: r.sale_id,
+        producto: r.product_name,
+        cantidad: toNumber(r.quantity),
+        precio_unitario: toNumber(r.unit_price),
+        importe: toNumber(r.quantity) * toNumber(r.unit_price),
+        descuento: Math.abs(toNumber(r.item_discount_amount)),
+        debe: r.item_subtotal < 0 ? Math.abs(toNumber(r.item_subtotal)) : '-',
+        haber: r.item_subtotal > 0 ? toNumber(r.item_subtotal) : '-',
+        metodo_pago: r.payment_method || '-'
+      })),
+      summaryRows: [
+        ['Total Debe', rows.reduce((acc, r) => acc + (r.item_subtotal < 0 ? Math.abs(toNumber(r.item_subtotal)) : 0), 0).toFixed(2)],
+        ['Total Haber', rows.reduce((acc, r) => acc + (r.item_subtotal > 0 ? toNumber(r.item_subtotal) : 0), 0).toFixed(2)],
+        ['Total Descuentos', rows.reduce((acc, r) => acc + Math.abs(toNumber(r.item_discount_amount)), 0).toFixed(2)]
+      ]
+    });
+
+    return sendWorkbook(res, workbook, `reporte_ventas_${Date.now()}.xlsx`);
+  } catch (error) {
+    console.error('Error exportando Excel de ventas:', error);
+    const code = error.status || 500;
+    return res.status(code).json({ error: error.message || 'Error al exportar Excel de ventas' });
+  }
+};
+
 // Exportar ventas PDF
 const exportToPDF = async (req, res) => {
   try {
@@ -602,6 +836,48 @@ const exportExpiringCSV = async (req, res) => {
   }
 };
 
+const exportExpiringExcel = async (req, res) => {
+  try {
+    const { sql, params, period } = buildExpiringQuery(req.query);
+    const rows = await allAsync(sql, params);
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'No se encontraron productos próximos a vencer.' });
+    }
+
+    const workbook = buildProfessionalWorkbook({
+      title: 'Reporte de Productos por Vencer',
+      subtitle: `Período: ${period === 'custom' ? `${toLatinoDate(req.query.start_date)} a ${toLatinoDate(req.query.end_date)}` : period} | Generado: ${new Date().toLocaleString('es-AR')}`,
+      columns: [
+        { header: 'SKU', key: 'sku' },
+        { header: 'Nombre', key: 'name' },
+        { header: 'Categoría', key: 'category' },
+        { header: 'Stock', key: 'stock' },
+        { header: 'Stock Mínimo', key: 'min_stock' },
+        { header: 'Vencimiento', key: 'expiration_date' }
+      ],
+      rows: rows.map((row) => ({
+        sku: row.sku || '-',
+        name: row.name,
+        category: row.category || 'Sin categoría',
+        stock: Number(row.stock || 0),
+        min_stock: Number(row.min_stock || 0),
+        expiration_date: toLatinoDate(row.expiration_date)
+      })),
+      summaryRows: [
+        ['Total Productos', rows.length],
+        ['Stock Total', rows.reduce((acc, row) => acc + Number(row.stock || 0), 0)]
+      ]
+    });
+
+    return sendWorkbook(res, workbook, `reporte_vencimientos_${Date.now()}.xlsx`);
+  } catch (error) {
+    console.error('Error exportando Excel de vencimientos:', error);
+    const code = error.status || 500;
+    return res.status(code).json({ error: error.message || 'Error al exportar Excel de vencimientos' });
+  }
+};
+
 // Exportar vencimientos PDF
 const exportExpiringPDF = async (req, res) => {
   try {
@@ -689,6 +965,9 @@ const getDiscountSales = async (req, res) => {
         s.subtotal,              -- subtotal (neto sin IVA, según tu createSale)
         s.tax,
         s.total,                 -- total con IVA
+        COALESCE(s.order_discount_amount, 0) AS order_discount_amount,
+        COALESCE(s.order_discount_type, '') AS order_discount_type,
+        COALESCE(s.order_discount_value, 0) AS order_discount_value,
 
         /* Itens con descuento */
         (
@@ -702,7 +981,7 @@ const getDiscountSales = async (req, res) => {
           SELECT COALESCE(SUM((si.quantity * si.unit_price) - si.subtotal), 0)
           FROM sale_items si
           WHERE si.sale_id = s.id
-        ) AS discount_total_amount,
+        ) AS item_discount_total_amount,
 
         /* Bruto antes de descuentos: Σ(q * unit_price) */
         (
@@ -719,10 +998,13 @@ const getDiscountSales = async (req, res) => {
         ) AS items_subtotal
       FROM sales s
       LEFT JOIN users u ON u.id = s.user_id
-      WHERE EXISTS (
-        SELECT 1
-        FROM sale_items si
-        WHERE si.sale_id = s.id AND COALESCE(si.discount, 0) > 0
+      WHERE (
+        EXISTS (
+          SELECT 1
+          FROM sale_items si
+          WHERE si.sale_id = s.id AND COALESCE(si.discount, 0) > 0
+        )
+        OR COALESCE(s.order_discount_amount, 0) > 0
       )
       ${dateFilter}
       ORDER BY s.created_at DESC
@@ -736,10 +1018,30 @@ const getDiscountSales = async (req, res) => {
       ${dateFilter}
     `;
 
-    const [rows, [tot]] = await Promise.all([
+    const [rawRows, [tot]] = await Promise.all([
       allAsync(rowsSql, params),
       allAsync(totSql, params),
     ]);
+
+    const rows = rawRows.map((row) => {
+      const itemDiscountAmount = Number(row.item_discount_total_amount || 0);
+      const orderDiscountAmount = Number(row.order_discount_amount || 0);
+      const hasItemDiscount = itemDiscountAmount > 0;
+      const hasOrderDiscount = orderDiscountAmount > 0;
+
+      let discount_origin = 'sin_descuento';
+      if (hasItemDiscount && hasOrderDiscount) discount_origin = 'mixto';
+      else if (hasItemDiscount) discount_origin = 'item';
+      else if (hasOrderDiscount) discount_origin = 'general';
+
+      return {
+        ...row,
+        item_discount_total_amount: itemDiscountAmount,
+        order_discount_amount: orderDiscountAmount,
+        discount_total_amount: itemDiscountAmount + orderDiscountAmount,
+        discount_origin
+      };
+    });
 
     // ---- resumen correcto ----
     const totalTickets = Number(tot?.total || 0);
@@ -815,11 +1117,14 @@ const exportDiscountCSV = async (req, res) => {
         s.subtotal,
         s.tax,
         s.total,
+        COALESCE(s.order_discount_amount, 0) AS order_discount_amount,
+        COALESCE(s.order_discount_type, '') AS order_discount_type,
+        COALESCE(s.order_discount_value, 0) AS order_discount_value,
         (
           SELECT COALESCE(SUM((si.quantity * si.unit_price) - si.subtotal), 0)
           FROM sale_items si
           WHERE si.sale_id = s.id
-        ) AS discount_total_amount,
+        ) AS item_discount_total_amount,
         (
           SELECT COALESCE(SUM(si.quantity * si.unit_price), 0)
           FROM sale_items si
@@ -827,15 +1132,34 @@ const exportDiscountCSV = async (req, res) => {
         ) AS gross_amount
       FROM sales s
       LEFT JOIN users u ON u.id = s.user_id
-      WHERE EXISTS (
-        SELECT 1 FROM sale_items si
-        WHERE si.sale_id = s.id AND COALESCE(si.discount, 0) > 0
+      WHERE (
+        EXISTS (
+          SELECT 1 FROM sale_items si
+          WHERE si.sale_id = s.id AND COALESCE(si.discount, 0) > 0
+        )
+        OR COALESCE(s.order_discount_amount, 0) > 0
       )
       ${dateFilter}
       ORDER BY s.created_at DESC
     `;
 
-    const rows = await allAsync(sql, params);
+    const rows = (await allAsync(sql, params)).map((r) => {
+      const itemDiscountAmount = Number(r.item_discount_total_amount || 0);
+      const orderDiscountAmount = Number(r.order_discount_amount || 0);
+      const discountTotal = itemDiscountAmount + orderDiscountAmount;
+      let origin = 'sin_descuento';
+      if (itemDiscountAmount > 0 && orderDiscountAmount > 0) origin = 'mixto';
+      else if (itemDiscountAmount > 0) origin = 'item';
+      else if (orderDiscountAmount > 0) origin = 'general';
+
+      return {
+        ...r,
+        item_discount_total_amount: itemDiscountAmount,
+        order_discount_amount: orderDiscountAmount,
+        discount_total_amount: discountTotal,
+        discount_origin: origin
+      };
+    });
     if (!rows.length) return res.status(404).json({ error: 'No hay datos de descuentos para exportar.' });
 
     const shaped = rows.map(r => ({
@@ -843,6 +1167,11 @@ const exportDiscountCSV = async (req, res) => {
       fecha: toLatinoDate(r.created_at),
       vendedor: r.seller_name || '-',
       metodo_pago: r.payment_method || '-',
+      origen_descuento: r.discount_origin,
+      descuento_items: Number(r.item_discount_total_amount || 0).toFixed(2),
+      descuento_general: Number(r.order_discount_amount || 0).toFixed(2),
+      tipo_descuento_general: r.order_discount_type || '-',
+      valor_descuento_general: Number(r.order_discount_value || 0).toFixed(2),
       bruto: Number(r.gross_amount || 0).toFixed(2),
       descuento: Number(r.discount_total_amount || 0).toFixed(2),
       neto_items: Number((r.gross_amount - r.discount_total_amount) || 0).toFixed(2),
@@ -858,6 +1187,11 @@ const exportDiscountCSV = async (req, res) => {
       { label: 'Fecha', value: 'fecha' },
       { label: 'Vendedor', value: 'vendedor' },
       { label: 'Método de Pago', value: 'metodo_pago' },
+      { label: 'Origen Descuento', value: 'origen_descuento' },
+      { label: 'Descuento Items', value: 'descuento_items' },
+      { label: 'Descuento General', value: 'descuento_general' },
+      { label: 'Tipo Descuento General', value: 'tipo_descuento_general' },
+      { label: 'Valor Descuento General', value: 'valor_descuento_general' },
       { label: 'Bruto', value: 'bruto' },
       { label: 'Descuento', value: 'descuento' },
       { label: 'Neto Ítems', value: 'neto_items' },
@@ -866,10 +1200,140 @@ const exportDiscountCSV = async (req, res) => {
       { label: '% Desc.', value: 'pct_descuento' }
     ];
 
-    await exportToCSV(res, `reporte_descuentos_${Date.now()}`, shaped, fields);
+    const parser = new Parser({ fields });
+    const csv = parser.parse(shaped);
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename=reporte_descuentos_${Date.now()}.csv`
+    );
+    return res.send(csv);
   } catch (error) {
     console.error('Error exportando CSV de descuentos:', error);
     res.status(500).json({ error: 'Error exportando CSV de descuentos' });
+  }
+};
+
+const exportDiscountExcel = async (req, res) => {
+  try {
+    const { start_date, end_date, period } = req.query;
+    const now = new Date();
+    let dateFilter = '';
+    const params = [];
+
+    if (period && period !== 'custom') {
+      const start = new Date();
+      if (period === 'today') {
+        dateFilter = 'AND DATE(s.created_at, "localtime") = DATE(?)';
+        params.push(new Date().toISOString().slice(0, 10));
+      } else if (period === 'week') {
+        start.setDate(now.getDate() - 7);
+        dateFilter = 'AND s.created_at BETWEEN ? AND ?';
+        params.push(start.toISOString(), now.toISOString());
+      } else if (period === 'month') {
+        start.setMonth(now.getMonth() - 1);
+        dateFilter = 'AND s.created_at BETWEEN ? AND ?';
+        params.push(start.toISOString(), now.toISOString());
+      } else if (period === 'year') {
+        start.setFullYear(now.getFullYear() - 1);
+        dateFilter = 'AND s.created_at BETWEEN ? AND ?';
+        params.push(start.toISOString(), now.toISOString());
+      }
+    } else if (start_date && end_date) {
+      dateFilter = 'AND DATE(s.created_at, "localtime") BETWEEN DATE(?) AND DATE(?)';
+      params.push(start_date, end_date);
+    }
+
+    const sql = `
+      SELECT
+        s.id,
+        s.created_at,
+        u.full_name AS seller_name,
+        s.payment_method,
+        s.total,
+        COALESCE(s.order_discount_amount, 0) AS order_discount_amount,
+        COALESCE(s.order_discount_type, '') AS order_discount_type,
+        (
+          SELECT COALESCE(SUM((si.quantity * si.unit_price) - si.subtotal), 0)
+          FROM sale_items si
+          WHERE si.sale_id = s.id
+        ) AS item_discount_total_amount,
+        (
+          SELECT COALESCE(SUM(si.quantity * si.unit_price), 0)
+          FROM sale_items si
+          WHERE si.sale_id = s.id
+        ) AS gross_amount
+      FROM sales s
+      LEFT JOIN users u ON u.id = s.user_id
+      WHERE (
+        EXISTS (
+          SELECT 1 FROM sale_items si
+          WHERE si.sale_id = s.id AND COALESCE(si.discount, 0) > 0
+        )
+        OR COALESCE(s.order_discount_amount, 0) > 0
+      )
+      ${dateFilter}
+      ORDER BY s.created_at DESC
+    `;
+
+    const rows = (await allAsync(sql, params)).map((r) => {
+      const itemDiscountAmount = Number(r.item_discount_total_amount || 0);
+      const orderDiscountAmount = Number(r.order_discount_amount || 0);
+      let origin = 'Por ítem';
+      if (itemDiscountAmount > 0 && orderDiscountAmount > 0) origin = 'Mixto';
+      else if (orderDiscountAmount > 0) origin = 'General';
+
+      return {
+        ...r,
+        discount_origin: origin,
+        discount_total_amount: itemDiscountAmount + orderDiscountAmount
+      };
+    });
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'No hay datos de descuentos para exportar.' });
+    }
+
+    const workbook = buildProfessionalWorkbook({
+      title: 'Reporte de Ventas con Descuento',
+      subtitle: `Período: ${period === 'custom' ? `${toLatinoDate(start_date)} a ${toLatinoDate(end_date)}` : (period || 'personalizado')} | Generado: ${new Date().toLocaleString('es-AR')}`,
+      columns: [
+        { header: 'Fecha', key: 'fecha' },
+        { header: 'ID Venta', key: 'id' },
+        { header: 'Vendedor', key: 'vendedor' },
+        { header: 'Método de Pago', key: 'metodo_pago' },
+        { header: 'Origen', key: 'origen' },
+        { header: 'Desc. Ítems', key: 'desc_items' },
+        { header: 'Desc. General', key: 'desc_general' },
+        { header: 'Tipo General', key: 'tipo_general' },
+        { header: 'Bruto', key: 'bruto' },
+        { header: 'Descuento Total', key: 'descuento_total' },
+        { header: 'Total Venta', key: 'total' }
+      ],
+      rows: rows.map((r) => ({
+        fecha: toLatinoDate(r.created_at),
+        id: r.id,
+        vendedor: r.seller_name || '-',
+        metodo_pago: r.payment_method || '-',
+        origen: r.discount_origin,
+        desc_items: Number(r.item_discount_total_amount || 0),
+        desc_general: Number(r.order_discount_amount || 0),
+        tipo_general: r.order_discount_type || '-',
+        bruto: Number(r.gross_amount || 0),
+        descuento_total: Number(r.discount_total_amount || 0),
+        total: Number(r.total || 0)
+      })),
+      summaryRows: [
+        ['Tickets con descuento', rows.length],
+        ['Total descontado', rows.reduce((acc, r) => acc + Number(r.discount_total_amount || 0), 0).toFixed(2)]
+      ]
+    });
+
+    return sendWorkbook(res, workbook, `reporte_descuentos_${Date.now()}.xlsx`);
+  } catch (error) {
+    console.error('Error exportando Excel de descuentos:', error);
+    return res.status(error.status || 500).json({ error: error.message || 'Error al exportar Excel de descuentos' });
   }
 };
 
@@ -905,7 +1369,7 @@ const exportDiscountPDF = async (req, res) => {
     }
 
     // === Datos de ventas con descuento ===
-    const sql = `
+  const sql = `
   SELECT
     s.id,
     s.created_at,
@@ -914,26 +1378,47 @@ const exportDiscountPDF = async (req, res) => {
     s.subtotal,
     s.tax,
     s.total,
+    COALESCE(s.order_discount_amount, 0) AS order_discount_amount,
+    COALESCE(s.order_discount_type, '') AS order_discount_type,
+    COALESCE(s.order_discount_value, 0) AS order_discount_value,
     (
       SELECT COALESCE(SUM((si.quantity * si.unit_price) - si.subtotal), 0)
       FROM sale_items si WHERE si.sale_id = s.id
-    ) AS discount_total_amount,
+    ) AS item_discount_total_amount,
     (
       SELECT COALESCE(SUM(si.quantity * si.unit_price), 0)
       FROM sale_items si WHERE si.sale_id = s.id
     ) AS gross_amount
   FROM sales s
   LEFT JOIN users u ON u.id = s.user_id
-  WHERE EXISTS (
-    SELECT 1 FROM sale_items si
-    WHERE si.sale_id = s.id AND COALESCE(si.discount, 0) > 0
+  WHERE (
+    EXISTS (
+      SELECT 1 FROM sale_items si
+      WHERE si.sale_id = s.id AND COALESCE(si.discount, 0) > 0
+    )
+    OR COALESCE(s.order_discount_amount, 0) > 0
   )
   ${dateFilter}
   ORDER BY s.created_at DESC
 `;
 
 
-    const rows = await allAsync(sql, params);
+    const rows = (await allAsync(sql, params)).map((r) => {
+      const itemDiscountAmount = Number(r.item_discount_total_amount || 0);
+      const orderDiscountAmount = Number(r.order_discount_amount || 0);
+      const discountTotal = itemDiscountAmount + orderDiscountAmount;
+      let origin = 'sin_descuento';
+      if (itemDiscountAmount > 0 && orderDiscountAmount > 0) origin = 'mixto';
+      else if (itemDiscountAmount > 0) origin = 'item';
+      else if (orderDiscountAmount > 0) origin = 'general';
+      return {
+        ...r,
+        item_discount_total_amount: itemDiscountAmount,
+        order_discount_amount: orderDiscountAmount,
+        discount_total_amount: discountTotal,
+        discount_origin: origin
+      };
+    });
     if (!rows.length)
       return res.status(404).json({ error: 'No hay datos de descuentos para exportar.' });
 
@@ -972,7 +1457,7 @@ const exportDiscountPDF = async (req, res) => {
     doc.moveDown(1);
 
     // --- Tabla ---
-    const colWidths = [55, 50, 90, 60, 60, 60, 60, 50];
+    const colWidths = [42, 42, 82, 46, 48, 48, 50, 50, 48];
     const startX = doc.x;
     const startY = doc.y;
     const headers = [
@@ -980,10 +1465,11 @@ const exportDiscountPDF = async (req, res) => {
       'Fecha',
       'Vendedor',
       'Método',
-      'Bruto',
-      'Descuento',
+      'Origen',
+      'Desc. Ítems',
+      'Desc. General',
+      'Desc. Total',
       'Total',
-      '% Desc.'
     ];
 
     doc.font('Helvetica-Bold').fontSize(9);
@@ -995,18 +1481,22 @@ const exportDiscountPDF = async (req, res) => {
     doc.font('Helvetica').fontSize(8);
 
     rows.forEach((r) => {
-      const pct = r.gross_amount > 0
-        ? ((r.discount_total_amount / r.gross_amount) * 100).toFixed(2) + '%'
-        : '0%';
+      const originLabel =
+        r.discount_origin === 'mixto'
+          ? `Mixto (${r.order_discount_type === 'percentage' ? '%' : '$'})`
+          : r.discount_origin === 'general'
+          ? `General (${r.order_discount_type === 'percentage' ? '%' : '$'})`
+          : 'Por ítem';
       const fila = [
         `#${String(r.id).padStart(4, '0')}`,
         toLatinoDate(r.created_at),
         r.seller_name || '-',
         r.payment_method || '-',
-        `$${r.gross_amount.toFixed(2)}`,
+        originLabel,
+        `$${r.item_discount_total_amount.toFixed(2)}`,
+        `$${r.order_discount_amount.toFixed(2)}`,
         `$${r.discount_total_amount.toFixed(2)}`,
         `$${r.total.toFixed(2)}`,
-        pct
       ];
 
 
@@ -1055,42 +1545,51 @@ totalLabel('Monto descontado:', `$${montoDescuento.toFixed(2)} (${pctMonto}%)`);
 
 doc.moveDown(1);
 
-    // === Insertar gráfico con quickchart.io ===
-    // === Insertar gráfico con quickchart.io (corregido y codificado) ===
-const chartConfig = {
-  type: 'pie',
-  data: {
-    labels: ['Con descuento', 'Sin descuento'],
-    datasets: [
-      {
-        data: [ticketsDescuento, totalTickets - ticketsDescuento],
-        backgroundColor: ['#4CAF50', '#FFC107'],
+    const chartConfig = {
+      type: 'pie',
+      data: {
+        labels: ['Con descuento', 'Sin descuento'],
+        datasets: [
+          {
+            data: [ticketsDescuento, totalTickets - ticketsDescuento],
+            backgroundColor: ['#4CAF50', '#FFC107'],
+          },
+        ],
       },
-    ],
-  },
-  options: {
-    plugins: {
-      legend: { position: 'bottom' },
-      title: { display: true, text: 'Distribución de Ventas con y sin Descuento' },
-    },
-  },
-};
+      options: {
+        plugins: {
+          legend: { position: 'bottom' },
+          title: { display: true, text: 'Distribución de Ventas con y sin Descuento' },
+        },
+      },
+    };
 
-// ✅ Codificar correctamente el JSON para URL
-const chartUrl = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}`;
+    try {
+      const chartUrl = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}`;
+      const chartImg = await axios.get(chartUrl, { responseType: 'arraybuffer', timeout: 8000 });
+      const imgBuffer = Buffer.from(chartImg.data, 'binary');
 
-const chartImg = await axios.get(chartUrl, { responseType: 'arraybuffer' });
-const imgBuffer = Buffer.from(chartImg.data, 'binary');
-
-// === Agregar nueva página y gráfico ===
-doc.addPage();
-doc.font('Helvetica-Bold').fontSize(16).text('Distribución de Ventas', { align: 'center' });
-doc.moveDown(0.5);
-doc.image(imgBuffer, {
-  fit: [400, 400],
-  align: 'center',
-  valign: 'center',
-});
+      doc.addPage();
+      doc.font('Helvetica-Bold').fontSize(16).text('Distribución de Ventas', { align: 'center' });
+      doc.moveDown(0.5);
+      doc.image(imgBuffer, {
+        fit: [400, 400],
+        align: 'center',
+        valign: 'center',
+      });
+    } catch (chartError) {
+      console.warn('No se pudo generar el gráfico externo de descuentos:', chartError.message);
+      doc.addPage();
+      doc.font('Helvetica-Bold').fontSize(16).text('Distribución de Ventas', { align: 'center' });
+      doc.moveDown(1);
+      doc.font('Helvetica').fontSize(11).text(
+        'No se pudo cargar el gráfico externo. El resto del reporte sigue siendo válido.',
+        { align: 'center' }
+      );
+      doc.moveDown(1);
+      doc.text(`Tickets con descuento: ${ticketsDescuento}`, { align: 'center' });
+      doc.text(`Tickets sin descuento: ${totalTickets - ticketsDescuento}`, { align: 'center' });
+    }
  doc.end();
   } catch (error) {
   console.error('Error exportando PDF de descuentos:', error);
@@ -1102,19 +1601,368 @@ doc.image(imgBuffer, {
    
 };
 
+function buildProductsListingQuery(query) {
+  const reportType = (query.report_type || 'by_category').toString().trim().toLowerCase();
+  const category = (query.category || '').toString().trim();
+  const supplier = (query.supplier || '').toString().trim();
+  const includePurchasePrice =
+    String(query.include_purchase_price || '').toLowerCase() === 'true' ||
+    query.include_purchase_price === true;
+
+  if (reportType === 'expiring') {
+    const { sql, params, period } = buildExpiringQuery(query);
+    return {
+      reportType,
+      sql,
+      params,
+      period,
+      title: 'Productos por Vencimiento'
+    };
+  }
+
+  let sql = `
+    SELECT
+      p.id,
+      p.sku,
+      p.ean13,
+      p.name,
+      p.category,
+      p.stock,
+      p.min_stock,
+      p.supplier,
+      p.purchase_price,
+      p.sale_price,
+      p.expiration_date,
+      p.active
+    FROM products p
+    WHERE 1=1
+  `;
+  const params = [];
+
+  if (reportType === 'by_category') {
+    if (category) {
+      sql += ' AND p.category = ?';
+      params.push(category);
+    }
+    sql += ' ORDER BY p.category ASC, p.name ASC';
+    return {
+      reportType,
+      sql,
+      params,
+      period: null,
+      title: 'Productos por Categoría',
+      includePurchasePrice
+    };
+  }
+
+  if (reportType === 'low_stock') {
+    sql += ' AND p.active = 1 AND COALESCE(p.stock, 0) <= COALESCE(p.min_stock, 0)';
+    if (category) {
+      sql += ' AND p.category = ?';
+      params.push(category);
+    }
+    sql += ' ORDER BY (COALESCE(p.min_stock, 0) - COALESCE(p.stock, 0)) DESC, p.name ASC';
+    return {
+      reportType,
+      sql,
+      params,
+      period: null,
+      title: 'Productos con Quiebre de Stock',
+      includePurchasePrice
+    };
+  }
+
+  if (reportType === 'by_supplier') {
+    if (supplier) {
+      sql += ' AND COALESCE(p.supplier, "") = ?';
+      params.push(supplier);
+    }
+    sql += ' ORDER BY COALESCE(p.supplier, "Sin proveedor") ASC, p.name ASC';
+    return {
+      reportType,
+      sql,
+      params,
+      period: null,
+      title: 'Productos por Proveedor',
+      includePurchasePrice
+    };
+  }
+
+  if (reportType === 'price_list') {
+    if (category) {
+      sql += ' AND p.category = ?';
+      params.push(category);
+    }
+    sql += ' AND p.active = 1 ORDER BY p.name ASC';
+    return {
+      reportType,
+      sql,
+      params,
+      period: null,
+      title: 'Lista de Precios',
+      includePurchasePrice
+    };
+  }
+
+  const err = new Error('Tipo de reporte de productos no soportado.');
+  err.status = 400;
+  throw err;
+}
+
+function buildProductsSummary(reportType, rows) {
+  const totalProducts = rows.length;
+  const totalStock = rows.reduce((acc, row) => acc + Number(row.stock || 0), 0);
+
+  if (reportType === 'by_category') {
+    const byCategory = rows.reduce((acc, row) => {
+      const key = row.category || 'Sin categoría';
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    return { total_products: totalProducts, total_stock: totalStock, by_category: byCategory };
+  }
+
+  if (reportType === 'by_supplier') {
+    const bySupplier = rows.reduce((acc, row) => {
+      const key = row.supplier || 'Sin proveedor';
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    return { total_products: totalProducts, total_stock: totalStock, by_supplier: bySupplier };
+  }
+
+  if (reportType === 'low_stock') {
+    return {
+      total_products: totalProducts,
+      total_stock: totalStock,
+      total_quiebre: totalProducts
+    };
+  }
+
+  if (reportType === 'expiring') {
+    return {
+      total_products: totalProducts,
+      total_stock: totalStock
+    };
+  }
+
+  return { total_products: totalProducts, total_stock: totalStock };
+}
+
+const getProductsListingReport = async (req, res) => {
+  try {
+    const { sql, params, period, reportType, title, includePurchasePrice } = buildProductsListingQuery(req.query);
+    const rows = await allAsync(sql, params);
+    return res.json({
+      report_type: reportType,
+      title,
+      period,
+      include_purchase_price: includePurchasePrice,
+      total: rows.length,
+      data: rows,
+      summary: buildProductsSummary(reportType, rows)
+    });
+  } catch (error) {
+    console.error('Error generando reporte de productos:', error);
+    return res.status(error.status || 500).json({
+      error: error.message || 'Error generando reporte de productos'
+    });
+  }
+};
+
+const exportProductsListingCSV = async (req, res) => {
+  try {
+    const { sql, params, reportType } = buildProductsListingQuery(req.query);
+    const rows = await allAsync(sql, params);
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'No hay datos para exportar.' });
+    }
+
+    const shaped = rows.map((row) => ({
+      sku: row.sku || '-',
+      ean13: row.ean13 || '-',
+      nombre: row.name || '-',
+      categoria: row.category || 'Sin categoría',
+      proveedor: row.supplier || 'Sin proveedor',
+      stock: Number(row.stock || 0),
+      stock_minimo: Number(row.min_stock || 0),
+      precio_compra: Number(row.purchase_price || 0).toFixed(2),
+      precio_venta: Number(row.sale_price || 0).toFixed(2),
+      vencimiento: row.expiration_date ? toLatinoDate(row.expiration_date) : '-'
+    }));
+
+    const parser = new Parser({
+      fields: [
+        { label: 'SKU', value: 'sku' },
+        { label: 'EAN13', value: 'ean13' },
+        { label: 'Nombre', value: 'nombre' },
+        { label: 'Categoría', value: 'categoria' },
+        { label: 'Proveedor', value: 'proveedor' },
+        { label: 'Stock', value: 'stock' },
+        { label: 'Stock Mínimo', value: 'stock_minimo' },
+        { label: 'Precio Compra', value: 'precio_compra' },
+        { label: 'Precio Venta', value: 'precio_venta' },
+        { label: 'Vencimiento', value: 'vencimiento' }
+      ]
+    });
+
+    const csv = parser.parse(shaped);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=reporte_productos_${reportType}_${Date.now()}.csv`);
+    return res.send(csv);
+  } catch (error) {
+    console.error('Error exportando CSV de productos:', error);
+    return res.status(error.status || 500).json({
+      error: error.message || 'Error exportando CSV de productos'
+    });
+  }
+};
+
+const exportProductsListingExcel = async (req, res) => {
+  try {
+    const { sql, params, period, reportType, title, includePurchasePrice } = buildProductsListingQuery(req.query);
+    const rows = await allAsync(sql, params);
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'No hay datos para exportar.' });
+    }
+
+    const columns = [
+      { header: 'SKU', key: 'sku' },
+      { header: 'EAN13', key: 'ean13' },
+      { header: 'Nombre', key: 'name' },
+      { header: 'Stock', key: 'stock' }
+    ];
+
+    if (reportType !== 'price_list') {
+      columns.push(
+        { header: 'Categoría', key: 'category' },
+        { header: 'Proveedor', key: 'supplier' },
+        { header: 'Stock Mínimo', key: 'min_stock' }
+      );
+    }
+
+    if (reportType === 'price_list' && includePurchasePrice) {
+      columns.push({ header: 'Precio Compra', key: 'purchase_price' });
+    }
+
+    columns.push({ header: 'Precio Venta', key: 'sale_price' });
+
+    if (reportType !== 'price_list') {
+      columns.push({ header: 'Vencimiento', key: 'expiration_date' });
+    }
+
+    const workbook = buildProfessionalWorkbook({
+      title,
+      subtitle: `${period ? `Período: ${period} | ` : ''}Generado: ${new Date().toLocaleString('es-AR')}`,
+      columns,
+      rows: rows.map((row) => ({
+        sku: row.sku || '-',
+        ean13: row.ean13 || '-',
+        name: row.name || '-',
+        category: row.category || 'Sin categoría',
+        supplier: row.supplier || 'Sin proveedor',
+        stock: Number(row.stock || 0),
+        min_stock: Number(row.min_stock || 0),
+        purchase_price: Number(row.purchase_price || 0),
+        sale_price: Number(row.sale_price || 0),
+        expiration_date: row.expiration_date ? toLatinoDate(row.expiration_date) : '-'
+      })),
+      summaryRows: [
+        ['Total Productos', rows.length],
+        ['Stock Total', rows.reduce((acc, row) => acc + Number(row.stock || 0), 0)]
+      ]
+    });
+
+    return sendWorkbook(res, workbook, `reporte_productos_${reportType}_${Date.now()}.xlsx`);
+  } catch (error) {
+    console.error('Error exportando Excel de productos:', error);
+    return res.status(error.status || 500).json({
+      error: error.message || 'Error al exportar Excel de productos'
+    });
+  }
+};
+
+const exportProductsListingPDF = async (req, res) => {
+  try {
+    const { sql, params, period, title, reportType, includePurchasePrice } = buildProductsListingQuery(req.query);
+    const rows = await allAsync(sql, params);
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'No hay datos para exportar.' });
+    }
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=reporte_productos_${Date.now()}.pdf`);
+    doc.pipe(res);
+
+    doc.fontSize(18).text(title, { align: 'center' });
+    if (period) {
+      doc.fontSize(10).text(`Período: ${period}`, { align: 'center' });
+    }
+    doc.fontSize(10).text(`Generado: ${new Date().toLocaleString('es-AR')}`, { align: 'center' });
+    doc.moveDown();
+
+    rows.slice(0, 120).forEach((row) => {
+      const parts = [
+        row.sku || '-',
+        row.ean13 || '-',
+        row.name,
+        `Stock: ${Number(row.stock || 0)}`
+      ];
+
+      if (reportType === 'price_list' && includePurchasePrice) {
+        parts.push(`Compra: $${Number(row.purchase_price || 0).toFixed(2)}`);
+      }
+
+      parts.push(`Venta: $${Number(row.sale_price || 0).toFixed(2)}`);
+
+      if (reportType !== 'price_list') {
+        parts.push(`Categoría: ${row.category || 'Sin categoría'}`);
+        parts.push(`Proveedor: ${row.supplier || 'Sin proveedor'}`);
+        parts.push(`Vence: ${row.expiration_date ? toLatinoDate(row.expiration_date) : '-'}`);
+      }
+
+      doc.fontSize(9).text(parts.join(' | '));
+    });
+
+    if (rows.length > 120) {
+      doc.moveDown();
+      doc.text(`... y ${rows.length - 120} productos más`, { align: 'center' });
+    }
+
+    doc.end();
+  } catch (error) {
+    console.error('Error exportando PDF de productos:', error);
+    return res.status(error.status || 500).json({
+      error: error.message || 'Error exportando PDF de productos'
+    });
+  }
+};
+
 
 // ========================= Exports =========================
 module.exports = {
   getSalesReport,
   exportToCSV,
   exportToPDF,
+  exportToExcel,
   exportCSV: exportToCSV,  // compatibilidad
   exportPDF: exportToPDF,  // compatibilidad
+  exportExcel: exportToExcel,
   getExpiringProductsReport,
   exportExpiringCSV,
   exportExpiringPDF,
+  exportExpiringExcel,
   getDiscountSales,
   exportDiscountCSV,
-  exportDiscountPDF
+  exportDiscountPDF,
+  exportDiscountExcel,
+  getProductsListingReport,
+  exportProductsListingCSV,
+  exportProductsListingPDF,
+  exportProductsListingExcel
 };
 

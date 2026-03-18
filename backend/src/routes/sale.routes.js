@@ -42,7 +42,7 @@ router.get('/refund/:refundId', verifyToken, getRefundById);
 
 router.get('/:id/check-refund', verifyToken, checkRefundExists);
 
-router.get('/refund/:id/pdf', generateRefundPDF);
+router.get('/refund/:id/pdf', verifyToken, generateRefundPDF);
 
 
 module.exports = router;

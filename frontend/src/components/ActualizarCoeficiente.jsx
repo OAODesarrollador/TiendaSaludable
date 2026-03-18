@@ -88,9 +88,9 @@ const ActualizarCoeficiente = () => {
                   <button
                     onClick={() => handleSave(c.category, c.coefficient)}
                     disabled={loading}
-                    className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded"
+                    className="bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded"
                   >
-                    {loading ? "..." : "Aplicar"}
+                    {loading ? "..." : "Guardar"}
                   </button>
                   <button
                     onClick={() => handleUpdatePrices(c.category)}

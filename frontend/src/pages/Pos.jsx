@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { productsAPI, salesAPI } from '../services/api';
+import { cashAPI, productsAPI, salesAPI } from '../services/api';
 import { toast } from 'react-toastify';
 import { Search, Trash2, Plus, Minus, ShoppingCart, Printer, Download, X, Calculator } from 'lucide-react';
 import logo from '../assets/Avenia.png';
 import { formatFechaHoraAR } from "../config/timezoneF";
+import AppModal from '../components/AppModal';
 
 const POS = () => {
   const [products, setProducts] = useState([]);
@@ -20,11 +21,16 @@ const POS = () => {
   const [calcQuantityInput, setCalcQuantityInput] = useState('1');
   const [calcQuantityNumber, setCalcQuantityNumber] = useState(1);
   const [discount, setDiscount] = useState(0);
+  const [orderDiscountMeta, setOrderDiscountMeta] = useState({ type: null, value: 0 });
   const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const [showCashClosedModal, setShowCashClosedModal] = useState(false);
+  const [showCancelSaleModal, setShowCancelSaleModal] = useState(false);
   const [discountType, setDiscountType] = useState('percentage');
   const [discountValue, setDiscountValue] = useState(0);
   const [editingProductId, setEditingProductId] = useState(null);
   const [paymentMethod, setPaymentMethod] = useState('efectivo');
+  const [cashSession, setCashSession] = useState(null);
+  const [cashSessionLoading, setCashSessionLoading] = useState(true);
 
 
   const barcodeInputRef = useRef(null);
@@ -33,6 +39,7 @@ const POS = () => {
 
   useEffect(() => {
     loadProducts();
+    loadCashSession();
   }, []);
 
   useEffect(() => {
@@ -49,6 +56,19 @@ const POS = () => {
     }
   };
 
+  const loadCashSession = async () => {
+    try {
+      setCashSessionLoading(true);
+      const response = await cashAPI.getSession();
+      setCashSession(response.data?.session || null);
+    } catch (error) {
+      console.error('Error consultando caja:', error);
+      setCashSession(null);
+    } finally {
+      setCashSessionLoading(false);
+    }
+  };
+
   const handleBarcodeSearch = async (e) => {
     e.preventDefault();
     if (!barcode || barcode.length !== 13) {
@@ -60,7 +80,7 @@ const POS = () => {
       addToCart(response.data);
       setBarcode('');
       barcodeInputRef.current?.focus();
-    } catch (error) {
+    } catch {
       toast.error('Producto no encontrado');
       setBarcode('');
     }
@@ -155,6 +175,12 @@ const POS = () => {
   // ===========================
   const handleCheckout = async () => {
     if (cart.length === 0) return toast.error('El carrito está vacío');
+
+    if (!cashSession || cashSession.closed) {
+      setShowCashClosedModal(true);
+      return;
+    }
+
     setLoading(true);
     try {
       const saleData = { 
@@ -165,8 +191,10 @@ const POS = () => {
           discount: i.discount || 0,           // ✅ valor de descuento
           discountType: i.discountType || 'percentage' // ✅ tipo de descuento
         })),
-        // Descuento global opcional (si lo usás):
-        order_discount: totalDiscount || 0,     // ✅ descuento total aplicado en el carrito
+        order_discount: totalDiscount || 0,
+        order_discount_amount: totalDiscount || 0,
+        order_discount_type: orderDiscountMeta.type,
+        order_discount_value: orderDiscountMeta.value || 0,
         payment_method: paymentMethod
 
       };
@@ -183,6 +211,9 @@ const POS = () => {
           discount: calculateItemDiscount(i)
         })),
         discount: totalDiscount,
+        order_discount_amount: totalDiscount,
+        order_discount_type: orderDiscountMeta.type,
+        order_discount_value: orderDiscountMeta.value || 0,
         subtotal: subtotal,
         subtotalNoTax: subtotalNoTax,
         tax: tax,
@@ -193,10 +224,12 @@ const POS = () => {
       setShowTicket(true);
       setCart([]);
       setDiscount(0);
+      setOrderDiscountMeta({ type: null, value: 0 });
       toast.success('¡Venta procesada exitosamente!');
       loadProducts();
-    } catch {
-      toast.error('Error al procesar la venta');
+      loadCashSession();
+    } catch (error) {
+      toast.error(error.response?.data?.error || 'Error al procesar la venta');
     } finally { setLoading(false); }
   };
 
@@ -242,6 +275,15 @@ const POS = () => {
     const saleSubtotalNoTax = lastSale.subtotalNoTax ?? subtotalNoTax;
     const saleTax = lastSale.tax ?? tax;
     const saleTotal = lastSale.total ?? subtotalAfterDiscount;
+    const paymentMethodLabel =
+      {
+        efectivo: 'Efectivo',
+        debito: 'Tarjeta Debito',
+        tarjeta_credito: 'Tarjeta Credito',
+        transferencia: 'Transferencia Bancaria',
+        qr: 'QR Generico',
+        qrmp: 'Mercado Pago (QR MP)',
+      }[lastSale.payment_method] ?? lastSale.payment_method ?? '---';
 
     const content = `
       <div style="font-family: Arial, sans-serif; font-size: 13px; color:black; width:280px; margin: auto; padding:10px; background:#fff;">
@@ -301,15 +343,7 @@ ${saleDiscount > 0 ? `
         </div>
         <hr style="border: 1px solid gray; width: 100%; margin-top: 8px;">
         <div style="padding:8px; font-size:11px; solid">
-          <div>Forma de pago: ${({
-  efectivo: 'Efectivo',
-  debito: 'Tarjeta Débito',
-  tarjeta_credito: 'Tarjeta Crédito',
-  transferencia: 'Transferencia Bancaria',
-  qr: 'QR Genérico',
-  qrmp: 'Mercado Pago (QR MP)'
-}[lastSale.payment_method] || lastSale.payment_method)}
- ?? '---'}</div>
+          <div>Forma de pago: ${paymentMethodLabel}</div>
         </div>
         <hr style="border: 1px solid gray; width: 100%; margin-top: auto;">
         <div style="text-align:center; margin-top:6px; font-size:12px;">
@@ -507,8 +541,8 @@ ${saleDiscount > 0 ? `
         setDiscountValue(item.discount || 0);
       }
     } else {
-      setDiscountType('percentage');
-      setDiscountValue(0);
+      setDiscountType(orderDiscountMeta.type || 'percentage');
+      setDiscountValue(orderDiscountMeta.value || 0);
     }
     setShowDiscountModal(true);
   };
@@ -559,6 +593,7 @@ ${saleDiscount > 0 ? `
         }
         setDiscount(value);
       }
+      setOrderDiscountMeta({ type: discountType, value });
       toast.success('Descuento total aplicado');
     }
     
@@ -609,7 +644,7 @@ const getExpirationMessage = (expirationDate) => {
                       addToCart(response.data);
                       setSearchTerm('');
                       toast.success('Producto agregado desde código de barras');
-                    } catch (error) {
+                    } catch {
                       toast.error('Código de barras no encontrado');
                     }
                   }
@@ -762,6 +797,20 @@ const getExpirationMessage = (expirationDate) => {
           </div>
 
           <div className="border-t border-gray-200 pt-4 space-y-2">
+            <div
+              className={`rounded-lg border px-3 py-2 text-sm ${
+                cashSession && !cashSession.closed
+                  ? 'border-green-200 bg-green-50 text-green-700'
+                  : 'border-red-200 bg-red-50 text-red-700'
+              }`}
+            >
+              {cashSessionLoading
+                ? 'Verificando estado de caja...'
+                : cashSession && !cashSession.closed
+                  ? `Caja abierta: ${cashSession.date}`
+                  : 'Caja cerrada. Debe abrir la caja antes de vender.'}
+            </div>
+
             <div className="flex justify-between text-sm">
               <span>Subtotal:</span>
               <span>${subtotal.toFixed(2)}</span>
@@ -829,20 +878,14 @@ const getExpirationMessage = (expirationDate) => {
           <div className="flex gap-2 mt-2">  
             <button
               onClick={handleCheckout}
-              disabled={cart.length === 0 || loading}
+              disabled={cart.length === 0 || loading || cashSessionLoading}
               className="flex-[3] bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
             >
               {loading ? 'Procesando...' : 'Finalizar Venta'}
             </button>
 
             <button
-              onClick={() => {
-                if (cart.length > 0 && window.confirm('¿Estás seguro de cancelar la venta y vaciar el carrito?')) {
-                  setCart([]);
-                  setDiscount(0);
-                  toast.info('Carrito vacío');
-                }
-              }}
+              onClick={() => setShowCancelSaleModal(true)}
               disabled={cart.length === 0}
               className="flex-1 bg-red-600 text-white py-3 rounded-lg font-medium hover:bg-red-700 disabled:opacity-50 disabled:bg-gray-300"
             >
@@ -852,66 +895,60 @@ const getExpirationMessage = (expirationDate) => {
         </div>
       </div>
 
-      {showCalc && selectedProduct && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-lg">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">Calcular precio por Kg/Litro</h2>
-              <button onClick={() => setShowCalc(false)} className="text-gray-500 hover:text-gray-700"><X size={22} /></button>
-            </div>
+      <AppModal
+        open={showCalc && !!selectedProduct}
+        onClose={() => setShowCalc(false)}
+        title="Calcular precio por Kg/Litro"
+        size="sm"
+      >
+            {selectedProduct && (
+              <>
+                <p className="text-sm mb-2 text-gray-600">Producto seleccionado:</p>
+                <p className="font-medium mb-4">{selectedProduct.name}</p>
 
-            <p className="text-sm mb-2 text-gray-600">Producto seleccionado:</p>
-            <p className="font-medium mb-4">{selectedProduct.name}</p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-sm text-gray-600">Precio por Kg/Lt:</label>
+                    <input
+                      type="number"
+                      className="w-full border rounded-lg px-3 py-2 mt-1"
+                      value={calcPrice}
+                      onChange={(e) => setCalcPrice(parseFloat(e.target.value) || 0)}
+                    />
+                  </div>
 
-            <div className="space-y-3">
-              <div>
-                <label className="text-sm text-gray-600">Precio por Kg/Lt:</label>
-                <input
-                  type="number"
-                  className="w-full border rounded-lg px-3 py-2 mt-1"
-                  value={calcPrice}
-                  onChange={(e) => setCalcPrice(parseFloat(e.target.value) || 0)}
-                />
-              </div>
+                  <div>
+                    <label className="text-sm text-gray-600">Cantidad (Kg/Lt):</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="w-full border rounded-lg px-3 py-2 mt-1"
+                      value={calcQuantityInput}
+                      onChange={handleCalcQuantityChange}
+                      placeholder="Ej: 1.250 o 1,25"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Se permiten coma o punto como separador decimal. Max 3 decimales.</p>
+                  </div>
 
-              <div>
-                <label className="text-sm text-gray-600">Cantidad (Kg/Lt):</label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  className="w-full border rounded-lg px-3 py-2 mt-1"
-                  value={calcQuantityInput}
-                  onChange={handleCalcQuantityChange}
-                  placeholder="Ej: 1.250 o 1,25"
-                />
-                <p className="text-xs text-gray-500 mt-1">Se permiten coma o punto como separador decimal. Max 3 decimales.</p>
-              </div>
+                  <div className="text-lg font-bold text-center mt-3">
+                    Precio Final: ${calcTotal.toFixed(2)}
+                  </div>
 
-              <div className="text-lg font-bold text-center mt-3">
-                Precio Final: ${calcTotal.toFixed(2)}
-              </div>
+                  <div className="flex gap-3 mt-4">
+                    <button onClick={() => setShowCalc(false)} className="flex-1 py-2 bg-gray-200 rounded-lg hover:bg-gray-300">Cancelar</button>
+                    <button onClick={handleConfirmCalc} className="flex-1 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">Confirmar</button>
+                  </div>
+                </div>
+              </>
+            )}
+      </AppModal>
 
-              <div className="flex gap-3 mt-4">
-                <button onClick={() => setShowCalc(false)} className="flex-1 py-2 bg-gray-200 rounded-lg hover:bg-gray-300">Cancelar</button>
-                <button onClick={handleConfirmCalc} className="flex-1 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">Confirmar</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showDiscountModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-lg">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">
-                {editingProductId ? 'Descuento por Producto' : 'Descuento Total'}
-              </h2>
-              <button onClick={() => setShowDiscountModal(false)} className="text-gray-500 hover:text-gray-700">
-                <X size={22} />
-              </button>
-            </div>
-
+      <AppModal
+        open={showDiscountModal}
+        onClose={() => setShowDiscountModal(false)}
+        title={editingProductId ? 'Descuento por Producto' : 'Descuento Total'}
+        size="sm"
+      >
             {editingProductId && (
               <div className="mb-4">
                 <p className="text-sm text-gray-600">Producto:</p>
@@ -976,9 +1013,61 @@ const getExpirationMessage = (expirationDate) => {
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+      </AppModal>
+
+      <AppModal
+        open={showCashClosedModal}
+        onClose={() => setShowCashClosedModal(false)}
+        title="Caja cerrada"
+        size="sm"
+        footer={
+          <button
+            onClick={() => setShowCashClosedModal(false)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Entendido
+          </button>
+        }
+      >
+            <p className="text-gray-700 mb-4">
+              Para registrar una venta primero debe haber una caja abierta.
+            </p>
+            <p className="text-sm text-gray-500 mb-6">
+              Abra la caja desde el modulo de caja y luego vuelva a intentar la venta.
+            </p>
+      </AppModal>
+
+      <AppModal
+        open={showCancelSaleModal}
+        onClose={() => setShowCancelSaleModal(false)}
+        title="Cancelar venta"
+        size="sm"
+      >
+            <p className="text-gray-700 mb-6">
+              Se vaciara el carrito y se perderan los descuentos aplicados a esta venta.
+            </p>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowCancelSaleModal(false)}
+                className="flex-1 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
+              >
+                Volver
+              </button>
+              <button
+                onClick={() => {
+                  setCart([]);
+                  setDiscount(0);
+                  setOrderDiscountMeta({ type: null, value: 0 });
+                  setShowCancelSaleModal(false);
+                  toast.info('Carrito vacío');
+                }}
+                className="flex-1 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+              >
+                Confirmar
+              </button>
+            </div>
+      </AppModal>
 
       {showTicket && lastSale && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">

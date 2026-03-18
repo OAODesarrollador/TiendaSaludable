@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 // Crear instancia de axios con configuración
 const api = axios.create({
@@ -84,17 +84,21 @@ export const reportsAPI = {
   // === Ventas ===
   getSalesReport: (params) => api.get('/reports/sales', { params }),
   exportCSV: (params) =>
-    api.get('/reports/export/csv', { params, responseType: 'blob' }),
+    api.get('/reports/sales/export/csv', { params, responseType: 'blob' }),
+  exportExcel: (params) =>
+    api.get('/reports/sales/export/excel', { params, responseType: 'blob' }),
   exportPDF: (params) =>
-    api.get('/reports/export/pdf', { params, responseType: 'blob' }),
+    api.get('/reports/sales/export/pdf', { params, responseType: 'blob' }),
 
   // === Vencimientos ===
   getExpiringProducts: (params) =>
     api.get('/reports/expiring', { params }),
   exportExpiringCSV: (params) =>
-    api.get('/reports/export/expiring-csv', { params, responseType: 'blob' }),
+    api.get('/reports/expiring/export/csv', { params, responseType: 'blob' }),
+  exportExpiringExcel: (params) =>
+    api.get('/reports/expiring/export/excel', { params, responseType: 'blob' }),
   exportExpiringPDF: (params) =>
-    api.get('/reports/export/expiring-pdf', { params, responseType: 'blob' }),
+    api.get('/reports/expiring/export/pdf', { params, responseType: 'blob' }),
 
   // === 🆕 Descuentos ===
   getDiscountSales: (params) =>
@@ -105,9 +109,34 @@ export const reportsAPI = {
       params,
       responseType: 'blob'
     }),
+  exportDiscountExcel: (params) =>
+    api.get('/reports/discounts/export/excel', {
+      params,
+      responseType: 'blob'
+    }),
 
   exportDiscountPDF: (params) =>
     api.get('/reports/discounts/export/pdf', {
+      params,
+      responseType: 'blob'
+    }),
+
+  getProductsReport: (params) =>
+    api.get('/reports/products', { params }),
+
+  exportProductsCSV: (params) =>
+    api.get('/reports/products/export/csv', {
+      params,
+      responseType: 'blob'
+    }),
+  exportProductsExcel: (params) =>
+    api.get('/reports/products/export/excel', {
+      params,
+      responseType: 'blob'
+    }),
+
+  exportProductsPDF: (params) =>
+    api.get('/reports/products/export/pdf', {
       params,
       responseType: 'blob'
     })
@@ -120,65 +149,58 @@ export const dashboardAPI = {
     api.get(`/dashboard/timeline?start_date=${start}&end_date=${end}`) // ✅ Usa 'api' en vez de 'axios'
 };
 
+// ========== CASH ==========
+export const cashAPI = {
+  getSession: () => api.get('/cash/session'),
+  getPendingClose: () => api.get('/cash/pending-close'),
+  openSession: (data) => api.post('/cash/register', data),
+  closeSession: (data) => api.post('/cash/close', data),
+  addMovement: (data) => api.post('/cash/movement', data),
+  getReport: (params) => api.get('/cash/report', { params })
+};
+
+// ========= SALE TYPES ==========
+export const saleTypesAPI = {
+  getAll: () => api.get('/sale-types'),
+  create: (data) => api.post('/sale-types', data),
+  update: (id, data) => api.put(`/sale-types/${id}`, data),
+  delete: (id) => api.delete(`/sale-types/${id}`)
+};
 
 // ========== IMPORTADOR ==========
 
 export async function fetchProducts() {
-  const res = await fetch(`${API_URL}/products`);
-  return res.json();
+  const res = await api.get('/products');
+  return res.data;
 }
 
 export async function createProduct(data) {
-  const res = await fetch(`${API_URL}/products`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
-  return res.json();
+  const res = await api.post('/products', data);
+  return res.data;
 }
 
 export async function updateProduct(id, data) {
-  const res = await fetch(`${API_URL}/products/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  });
-  return res.json();
+  const res = await api.put(`/products/${id}`, data);
+  return res.data;
 }
 
 export async function deleteProduct(id) {
-  const res = await fetch(`${API_URL}/products/${id}`, { method: 'DELETE' });
-  return res.json();
+  const res = await api.delete(`/products/${id}`);
+  return res.data;
 }
 
 export const importCsv = async (formData) => {
-  const res = await fetch(`${API_URL}/import`, {
-    method: 'POST',
-    body: formData
+  const res = await api.post('/import', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
   });
-
-  // Manejo explícito de errores HTTP
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Error en servidor: ${res.status} ${text || res.statusText}`);
-  }
-
-  // Retornamos el JSON parseado
-  return res.json();
+  return res.data;
 };
 
 export const updatePricesMatched = async (formData) => {
-  const res = await fetch(`${API_URL}/import/update-prices-matched`, {
-    method: "POST",
-    body: formData,
+  const res = await api.post('/import/update-prices-matched', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
   });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Error en servidor: ${res.status} ${text || res.statusText}`);
-  }
-
-  return res.json();
+  return res.data;
 };
 
 

@@ -29,7 +29,7 @@ const Dashboard = () => {
       const response = await dashboardAPI.getStats();
       setStats(response.data);
     } catch (error) {
-      console.error('Error cargando dashboard:', error);
+      
       toast.error('Error al cargar estadísticas');
     } finally {
       setLoading(false);

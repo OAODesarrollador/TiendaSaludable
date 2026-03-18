@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { createPortal } from 'react-dom';
+import AppModal from './AppModal';
 
 const ProductModal = memo(function ProductModal({
   showModal,
@@ -10,27 +10,18 @@ const ProductModal = memo(function ProductModal({
   handlePriceBlur,
   handleSubmit,
   resetForm,
-    categories
+  categories
 }) {
   if (!showModal) return null;
 
-  return createPortal(
-    <div 
-      className="fixed inset-0 flex items-center justify-center p-4 bg-black/50"
-      style={{ zIndex: 99999, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}
-      onClick={(e) => { if (e.target === e.currentTarget) { setShowModal(false); resetForm(); } }}
+  return (
+    <AppModal
+      open={showModal}
+      onClose={() => { setShowModal(false); resetForm(); }}
+      title={editingProduct ? 'Editar Producto' : 'Nuevo Producto'}
+      size="lg"
+      bodyClassName="max-h-[78vh] overflow-y-auto"
     >
-      <div 
-        className="bg-white rounded-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto shadow-2xl"
-        style={{ position: 'relative', zIndex: 100000 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold">{editingProduct ? 'Editar Producto' : 'Nuevo Producto'}</h2>
-          <button onClick={() => { setShowModal(false); resetForm(); }} className="text-gray-500 hover:text-gray-700 text-2xl leading-none">✕</button>
-        </div>
-
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* -- aquí pegás exactamente los inputs que ya tenés -- */}
           
@@ -202,9 +193,7 @@ const ProductModal = memo(function ProductModal({
             </button>
           </div>
         </form>
-      </div>
-    </div>,
-    document.body
+    </AppModal>
   );
 });
 

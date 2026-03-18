@@ -19,6 +19,8 @@ frontend/dist/
 
 backend/database/*.sqlite
 backend/database/*.sqlite3
+backend/.tmp-smoke/
+database/
 
 # Logs
 *.log

@@ -1,9 +1,9 @@
 // BarcodeScanner.jsx
 import { useState, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { Camera, X, Scan } from 'lucide-react';
 import { toast } from 'react-toastify';
 import Quagga from '@ericblade/quagga2';
+import AppModal from './AppModal';
 
 const BarcodeScanner = ({ isOpen, onClose, onDetected }) => {
   const [scanning, setScanning] = useState(false);
@@ -172,30 +172,14 @@ const BarcodeScanner = ({ isOpen, onClose, onDetected }) => {
 
   if (!isOpen) return null;
 
-  return createPortal(
-    <div
-      className="fixed inset-0 flex items-center justify-center p-4 bg-black/80"
-      style={{ zIndex: 99999 }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) handleClose();
-      }}
+  return (
+    <AppModal
+      open={isOpen}
+      onClose={handleClose}
+      title="Escanear Código de Barras"
+      icon={<Camera size={22} className="text-green-600" />}
+      size="lg"
     >
-      <div
-        className="bg-white rounded-xl max-w-2xl w-full p-6 shadow-2xl"
-        style={{ position: 'relative' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold flex items-center gap-2">
-            <Camera size={24} className="text-green-600" />
-            Escanear Código de Barras
-          </h2>
-          <button onClick={handleClose} className="text-gray-500 hover:text-gray-700 text-2xl leading-none">
-            <X size={24} />
-          </button>
-        </div>
-
         {/* Scanner area */}
         <div className="mb-4">
           {!scanning ? (
@@ -239,9 +223,7 @@ const BarcodeScanner = ({ isOpen, onClose, onDetected }) => {
           {scanning && <button onClick={() => { internalStopQuagga(); setScanning(false); }} className="flex-1 px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700">Detener Escáner</button>}
           <button onClick={handleClose} className="flex-1 px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">Cerrar</button>
         </div>
-      </div>
-    </div>,
-    document.body
+    </AppModal>
   );
 };
 

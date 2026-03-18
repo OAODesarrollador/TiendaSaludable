@@ -2,50 +2,38 @@ name: Test Application
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   test:
     runs-on: windows-latest
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Setup Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: |
-          backend/package-lock.json
-          frontend/package-lock.json
-    
-    - name: Install Backend Dependencies
-      run: |
-        cd backend
-        npm install
-    
-    - name: Install Frontend Dependencies
-      run: |
-        cd frontend
-        npm install
-    
-    - name: Setup Database
-      run: |
-        cd backend
-        npm run setup
-    
-    - name: Test Backend
-      run: |
-        cd backend
-        npm start &
-        sleep 10
-        curl -f http://localhost:3000 || exit 1
-    
-    - name: Test Frontend Build
-      run: |
-        cd frontend
-        npm run build
 
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install Backend Dependencies
+        working-directory: backend
+        run: npm install
+
+      - name: Install Frontend Dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: Run Backend Smoke Test
+        working-directory: backend
+        run: node smoke-test.js
+
+      - name: Build Frontend
+        working-directory: frontend
+        run: npm run build

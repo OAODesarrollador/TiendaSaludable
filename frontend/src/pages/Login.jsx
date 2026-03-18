@@ -3,7 +3,7 @@
    (Bootstrap + React, estilo separado en Login.css)
    ========================== */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { authAPI } from '../services/api';
@@ -31,7 +31,7 @@ const Login = () => {
       toast.success(`¡Bienvenido ${user.full_name}!`);
       navigate('/');
     } catch (error) {
-      console.error('Error en login:', error);
+      
       toast.error(error.response?.data?.error || 'Error al iniciar sesión');
     } finally {
       setLoading(false);

@@ -9,7 +9,6 @@ const { Parser } = require('json2csv');
 const db = require("../config/database");
 
 const { getCurrentARTimestamp, getCurrentARDate } = require('../config/timezoneB');
-const fechaAR = getCurrentARTimestamp();
 
 // --------------------------------------------
 // Helpers
@@ -41,6 +40,9 @@ const toLatinoDate = (d) => {
   const year = dt.getFullYear();
   return `${day}-${month}-${year}`;
 };
+
+const isSaleMovementConcept = (concept) => /^Venta #\d+/i.test(String(concept || '').trim());
+const isRefundMovementConcept = (concept) => /^Nota de crédito #/i.test(String(concept || '').trim());
 // --------------------------------------------
 // Bootstrapping: asegurar tablas
 // --------------------------------------------
@@ -87,11 +89,12 @@ async function getSessionByDate(dateStr) {
 
 async function createSession({ date, opening_amount, carried_balance = 0 }) {
   const ds = toISODate(date);
+  const createdAt = getCurrentARTimestamp();
   
   await runAsync(
     `INSERT INTO cash_sessions (date, opening_amount, carried_balance, closed, created_at)
     VALUES (?, ?, ?, 0, ?)`,
-    [ds, Number(opening_amount || 0), Number(carried_balance || 0), fechaAR]
+    [ds, Number(opening_amount || 0), Number(carried_balance || 0), createdAt]
   );
 
   return await getSessionByDate(ds);
@@ -181,15 +184,9 @@ const addCashMovement = async (req, res) => {
 
     // Insertar movimiento usando la fecha de la caja (no la del sistema)
     await runAsync(
-      `INSERT INTO cash_movements (session_id, type, concept, amount, payment_method, user_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [session.id, type, concept, Math.abs(Number(amount)), payment_method || null, user_id, fechaHoraAR]
-    );
-
-    // 🔹 Actualizar el campo date del movimiento con la fecha de la caja
-    await runAsync(
-      `UPDATE cash_movements SET date = ? WHERE id = (SELECT MAX(id) FROM cash_movements)`
-      , [fechaCaja]
+      `INSERT INTO cash_movements (session_id, type, concept, amount, payment_method, user_id, created_at, date)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [session.id, type, concept, Math.abs(Number(amount)), payment_method || null, user_id, fechaHoraAR, fechaCaja]
     );
 
     return res.status(201).json({ message: 'Movimiento registrado correctamente con fecha de la caja abierta' });
@@ -253,40 +250,6 @@ async function recordRefundExpense({ total, sale_id, refund_id, user_id }) {
   );
 }
 
-// ✅ NUEVO: registrar comisión de venta como egreso en caja, en tiempo real
-async function recordCommissionExpense({
-  commission_amount,
-  payment_method,
-  sale_id,
-  user_id,
-}) {
-  const session = await getOpenSession();
-  if (!session) {
-    throw new Error(
-      'No hay caja abierta hoy. Debe abrir caja antes de registrar comisiones.'
-    );
-  }
-
-  const monto = Math.abs(Number(commission_amount || 0));
-  if (!monto) return; // si la comisión es 0, no insertamos nada
-
-  const fechaAR = getCurrentARTimestamp();
-
-  await runAsync(
-    `INSERT INTO cash_movements (session_id, type, concept, amount, payment_method, user_id, created_at, date)
-     VALUES (?, 'egreso', ?, ?, ?, ?, ?, ?)`,
-    [
-      session.id,
-      `Comisión ${String(payment_method || '').toUpperCase()}`,
-      monto,
-      payment_method || null,
-      user_id || null,
-      fechaAR,
-      session.date,
-    ]
-  );
-}
-
 // --------------------------------------------
 // API: cierre
 // --------------------------------------------
@@ -338,7 +301,7 @@ const getTodaySession = async (_req, res) => {
     }
 
     // Si no hay abierta, devolver la de hoy (si existe)
-    const date = toISODate(new Date());
+    const date = getCurrentARDate();
     const s = await getSessionByDate(date);
     return res.json({ date, session: s || null });
   } catch (err) {
@@ -349,8 +312,10 @@ const getTodaySession = async (_req, res) => {
 
 const getPendingCloseWarning = async (_req, res) => {
   try {
-    const today = toISODate(new Date());
-    const yesterday = toISODate(new Date(Date.now() - 24 * 3600 * 1000));
+    const today = getCurrentARDate();
+    const yesterdayDate = new Date(`${today}T12:00:00`);
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterday = toISODate(yesterdayDate);
     const y = await getSessionByDate(yesterday);
     if (y && y.closed === 0) {
       return res.json({ pending: true, message: `Falta cerrar la caja del ${toLatinoDate(yesterday)}.` });
@@ -410,7 +375,9 @@ async function queryCashRange({ start, end }) {
   );
 
   const movements = await allAsync(
-    `SELECT m.*, s.date
+      `SELECT
+        m.*,
+        s.date
      FROM cash_movements m
      INNER JOIN cash_sessions s ON s.id = m.session_id
      WHERE date(s.date) BETWEEN ? AND ?
@@ -462,14 +429,19 @@ const getCashReport = async (req, res) => {
     for (const m of movements) {
       const sid = m.session_id;
       if (!liveBySession[sid]) {
-        liveBySession[sid] = { income: 0, expense: 0 };
+        liveBySession[sid] = { income: 0, expense: 0, refund: 0 };
       }
 
-      if (m.type === "ingreso") {
+      if (m.type === "ingreso" && !isSaleMovementConcept(m.concept)) {
         liveBySession[sid].income += Number(m.amount || 0);
+        continue;
       }
 
-      // Comisiones, notas de crédito y otros egresos ya vienen como "egreso"
+      if (m.type === "egreso" && isRefundMovementConcept(m.concept)) {
+        liveBySession[sid].refund += Number(m.amount || 0);
+        continue;
+      }
+
       if (m.type === "egreso") {
         liveBySession[sid].expense += Number(m.amount || 0);
       }
@@ -477,84 +449,34 @@ const getCashReport = async (req, res) => {
 
     // 4) Totales de ventas por día y método de pago
     const salesTotals = {};
+    const refundsTotals = {};
     for (const s of sales) {
       const d = s.date.slice(0, 10);
       const metodo = (s.payment_method || "sin_especificar").toLowerCase();
+      const amount = Number(s.amount || 0);
 
-      if (!salesTotals[d]) salesTotals[d] = { total: 0 };
-      if (!salesTotals[d][metodo]) salesTotals[d][metodo] = 0;
+      if ((s.type || '').toLowerCase() === 'venta') {
+        if (!salesTotals[d]) salesTotals[d] = { total: 0 };
+        if (!salesTotals[d][metodo]) salesTotals[d][metodo] = 0;
 
-      salesTotals[d][metodo] += Number(s.amount || 0);
-      salesTotals[d].total += Number(s.amount || 0);
-    }
+        salesTotals[d][metodo] += amount;
+        salesTotals[d].total += amount;
+        continue;
+      }
 
-    // 5) Comisiones desde sale_commissions para sesiones ABIERTAS
-    const openSessionDates = new Set(
-      sessions
-        .filter((s) => s.closed === 0)
-        .map((s) => toISODate(s.date))
-    );
-
-    let commissionsOpenByMethod = {};
-    let commissionsOpenTotal = 0;
-
-    if (openSessionDates.size > 0) {
-      try {
-        const commissionRows = await allAsync(
-          `
-          SELECT 
-            DATE(s.created_at)        AS date,
-            sc.payment_method         AS payment_method,
-            SUM(sc.commission_amount) AS total_commission
-          FROM sale_commissions sc
-          JOIN sales s ON sc.sale_id = s.id
-          WHERE DATE(s.created_at) BETWEEN ? AND ?
-          GROUP BY DATE(s.created_at), sc.payment_method
-        `,
-          [range.start, range.end]
-        );
-
-        for (const row of commissionRows) {
-          const day = toISODate(row.date);
-
-          // Solo considerar días con caja ABIERTA
-          if (!openSessionDates.has(day)) continue;
-
-          const method = (row.payment_method || "otros").toLowerCase();
-          const amount = Number(row.total_commission || 0);
-          if (!amount) continue;
-
-          if (!commissionsOpenByMethod[method]) {
-            commissionsOpenByMethod[method] = 0;
-          }
-          commissionsOpenByMethod[method] += amount;
-          commissionsOpenTotal += amount;
-        }
-      } catch (err) {
-        console.error("getCashReport - error obteniendo sale_commissions:", err);
-        // Si falla (por ejemplo, no existe la tabla), no tiramos 500; solo dejamos comisiones en 0
-        commissionsOpenByMethod = {};
-        commissionsOpenTotal = 0;
+      if ((s.type || '').toLowerCase() === 'nota_credito') {
+        refundsTotals[d] = (refundsTotals[d] || 0) + Math.abs(amount);
       }
     }
 
-    // 6) Resumen por sesión (base contable)
+    // 5) Resumen por sesión (base contable)
     const summary = sessions.map((s) => {
-      const live = liveBySession[s.id] || { income: 0, expense: 0 };
+      const live = liveBySession[s.id] || { income: 0, expense: 0, refund: 0 };
 
       const opening = Number(s.opening_amount || 0);
       const income = live.income;
-      let expense = live.expense;
-
-      // Sumar notas de crédito del mismo día como egreso adicional
-      const refundsOfDay = sales.filter(
-        (x) => x.type === "nota_credito" && x.date === s.date
-      );
-      const refundsTotal = refundsOfDay.reduce(
-        (acc, r) => acc + Math.abs(Number(r.amount || 0)),
-        0
-      );
-      expense += refundsTotal;
+      const refundsTotal = Number(refundsTotals[s.date] || live.refund || 0);
+      const expense = Number(live.expense || 0) + refundsTotal;
 
       // Ventas de ese día (incluye total por método)
       const daySales = salesTotals[s.date] || {};
@@ -575,7 +497,7 @@ const getCashReport = async (req, res) => {
       };
     });
 
-    // 7) Formatos CSV / PDF (igual que antes)
+    // 6) Formatos CSV / PDF (igual que antes)
     if (format === "csv") {
       const parser = new Parser({
         fields: [
@@ -662,7 +584,7 @@ const getCashReport = async (req, res) => {
       return;
     }
 
-    // 8) Respuesta JSON por defecto (para React)
+    // 7) Respuesta JSON por defecto (para React)
     return res.json({
       range,
       sessions: summary,
@@ -670,8 +592,7 @@ const getCashReport = async (req, res) => {
       movements,
       sales,
       salesTotals,
-      commissionsOpenByMethod,
-      commissionsOpenTotal,
+      creditNotesTotal: Object.values(refundsTotals).reduce((acc, amount) => acc + Number(amount || 0), 0),
     });
   } catch (err) {
     console.error("getCashReport:", err);
@@ -684,72 +605,6 @@ const getCashReport = async (req, res) => {
 
 
 
-// ======================================================================
-// REGISTRAR EGRESOS DE COMISIONES AL CERRAR UNA SESIÓN DE CAJA
-// ======================================================================
-async function registerCommissionsForCashSession(sessionId) {
-  try {
-    console.log("🔍 Procesando comisiones para la sesión:", sessionId);
-
-    // Traemos la fecha de la sesión para definir el día de trabajo
-    const session = await getAsync(
-      `SELECT id, date FROM cash_sessions WHERE id = ?`,
-      [sessionId]
-    );
-
-    if (!session) {
-      console.warn("⚠️ Sesión no encontrada:", sessionId);
-      return;
-    }
-
-    // Trabajamos a nivel día completo
-    const start = `${session.date} 00:00:00`;
-    const end   = `${session.date} 23:59:59`;
-
-    const commissions = await allAsync(
-      `
-        SELECT sc.payment_method,
-               SUM(sc.commission_amount) AS total_commission
-        FROM sale_commissions sc
-        JOIN sales s ON sc.sale_id = s.id
-        WHERE s.created_at BETWEEN ? AND ?
-        GROUP BY sc.payment_method
-      `,
-      [start, end]
-    );
-
-    if (!commissions || commissions.length === 0) {
-      console.log("ℹ️ No hay comisiones para registrar en esta sesión.");
-      return;
-    }
-
-    for (const c of commissions) {
-      const total = Number(c.total_commission || 0);
-      if (total <= 0) continue;
-
-      await runAsync(
-        `
-          INSERT INTO cash_movements 
-          (session_id, type, concept, amount, payment_method, created_at)
-          VALUES (?, 'egreso', ?, ?, ?, ?)
-        `,
-        [
-          sessionId,
-          `Comisión ${String(c.payment_method || "").toUpperCase()}`,
-          total,                        // 👉 monto POSITIVO
-          c.payment_method || null,
-          fechaAR,                      // 👉 mismo timestamp AR que el resto
-        ]
-      );
-
-      console.log(`🧾 Comisión registrada: ${c.payment_method} → $${total}`);
-    }
-  } catch (error) {
-    console.error("❌ Error registrando comisiones:", error);
-  }
-}
-
-
 module.exports = {
   openCashSession,
   addCashMovement,
@@ -759,7 +614,5 @@ module.exports = {
   getCashReport,
   recordSaleIncome,
   recordRefundExpense,
-  recordCommissionExpense,
   ensureCashTables,
 };
-

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+//import { Link, Outlet, useLocation } from "react-router-dom";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -195,6 +196,15 @@ const Layout = () => {
                     onClick={() => setReportesOpen(true)}
                   >
                     📉 Descuentos
+                  </Link>
+                  <Link
+                    to="/reportes/productos"
+                    className={`ln-dropdown-item ${
+                      location.pathname === "/reportes/productos" ? "ln-active" : ""
+                    }`}
+                    onClick={() => setReportesOpen(true)}
+                  >
+                    📦 Productos
                   </Link>
                 </div>
               )}

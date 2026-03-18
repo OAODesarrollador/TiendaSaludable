@@ -6,16 +6,9 @@ const { db, runAsync, getAsync, allAsync } = require('../config/database');
 const PDFDocument = require('pdfkit');
 
 const { formatFechaHoraAR, getCurrentARTimestamp } = require('../config/timezoneB');
-
-// 💳 Comisión por método de pago (editable si querés hacerlo dinámico después)
-const COMMISSION_RATES = {
-  efectivo: 0,              // 0%
-  qr: 0.05,                 // 5%
-  qrmp: 0.06,               // 6%
-  transferencia: 0.01,      // 1%
-  debito: 0.03,             // 3%
-  tarjeta_credito: 0.08     // 8%
-};
+const {
+  recordSaleIncome
+} = require('./cash.controller');
 
 
 
@@ -24,7 +17,14 @@ const COMMISSION_RATES = {
 // ============================================
 const createSale = async (req, res) => {
   try {
-    const { items, payment_method = 'efectivo' } = req.body;
+    const {
+      items,
+      payment_method = 'efectivo',
+      order_discount = 0,
+      order_discount_amount,
+      order_discount_type = null,
+      order_discount_value = 0
+    } = req.body;
     
     const validPayments = ['efectivo', 'qr', 'qrmp', 'transferencia', 'debito', 'tarjeta_credito'];
 
@@ -36,6 +36,16 @@ const createSale = async (req, res) => {
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'No hay productos en la venta' });
+    }
+
+    const openCashSession = await getAsync(
+      `SELECT id, date FROM cash_sessions WHERE closed = 0 ORDER BY id DESC LIMIT 1`
+    );
+
+    if (!openCashSession) {
+      return res.status(409).json({
+        error: 'No hay caja abierta. Abra la caja antes de registrar una venta.'
+      });
     }
 
     await runAsync('BEGIN TRANSACTION');
@@ -88,15 +98,44 @@ const createSale = async (req, res) => {
         await runAsync('UPDATE products SET stock = stock - ? WHERE id = ?', [qty, product.id]);
       }
 
+      const requestedOrderDiscount = Number(
+        order_discount_amount ?? order_discount ?? 0
+      );
+      const safeOrderDiscount = Math.max(
+        0,
+        Math.min(Number.isFinite(requestedOrderDiscount) ? requestedOrderDiscount : 0, subtotal)
+      );
+
+      const subtotalWithDiscounts = subtotal - safeOrderDiscount;
       const taxRate = parseFloat(process.env.IVA_RATE || 21) / 100;
-      const totalNoTax = subtotal / (1 + taxRate);
-      const tax = subtotal - totalNoTax;
+      const totalNoTax = subtotalWithDiscounts / (1 + taxRate);
+      const tax = subtotalWithDiscounts - totalNoTax;
       const total = totalNoTax + tax;
       const createdAt = getCurrentARTimestamp();
       console.log('🕒 Guardando venta con fecha:', createdAt);  
       const saleResult = await runAsync(
-        'INSERT INTO sales (user_id, subtotal, tax, total, payment_method, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-        [userId, totalNoTax, tax, total, payment_method, createdAt]
+        `INSERT INTO sales (
+          user_id,
+          subtotal,
+          tax,
+          total,
+          payment_method,
+          created_at,
+          order_discount_amount,
+          order_discount_type,
+          order_discount_value
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          userId,
+          totalNoTax,
+          tax,
+          total,
+          payment_method,
+          createdAt,
+          safeOrderDiscount,
+          safeOrderDiscount > 0 ? order_discount_type : null,
+          safeOrderDiscount > 0 ? Number(order_discount_value || 0) : 0
+        ]
       );
 
       const saleId = saleResult.id;
@@ -118,33 +157,12 @@ const createSale = async (req, res) => {
         );
       }
 
-// ===============================
-// 🧾 Registrar comisión por venta
-// ===============================
-const commissionRate = COMMISSION_RATES[payment_method] || 0;
-const commissionAmount = total * commissionRate;
-
-// Guardar comisión individual del ticket
-await runAsync(
-  `INSERT INTO sale_commissions 
-   (sale_id, payment_method, base_amount, commission_rate, commission_amount)
-   VALUES (?, ?, ?, ?, ?)`,
-  [saleId, payment_method, total, commissionRate, commissionAmount]
-);
-
-// ===============================
-// 🔥 Registrar movimiento de comisión en caja
-// (para que aparezca ANTES del cierre)
-// ===============================
-await runAsync(
-  `INSERT INTO movements (type, concept, amount, payment_method, date)
-   VALUES ('commission', ?, ?, ?, DATE('now', 'localtime'))`,
-  [
-    `Comisión ${payment_method}`,
-    Math.abs(commissionAmount),
-    payment_method
-  ]
-);
+      await recordSaleIncome({
+        total,
+        sale_id: saleId,
+        payment_method,
+        user_id: userId
+      });
 
 
       await runAsync('COMMIT');
@@ -164,6 +182,11 @@ await runAsync(
     }
   } catch (error) {
     console.error('Error creando venta:', error);
+
+    if (String(error.message || '').includes('No hay caja abierta')) {
+      return res.status(409).json({ error: error.message });
+    }
+
     res.status(500).json({ error: 'Error al procesar la venta' });
   }
 };
@@ -529,6 +552,13 @@ const generateTicketPDF = async (req, res) => {
     doc.text('─'.repeat(38), { align: 'center' });
     doc.moveDown(0.5);
     doc.fontSize(9);
+    if (Number(sale.order_discount_amount || 0) > 0) {
+      const orderDiscountTypeLabel =
+        sale.order_discount_type === 'percentage'
+          ? `${Number(sale.order_discount_value || 0)}%`
+          : `$${Number(sale.order_discount_value || 0).toFixed(2)}`;
+      doc.text(`Descuento general: -$${Number(sale.order_discount_amount || 0).toFixed(2)} (${orderDiscountTypeLabel})`, { align: 'right' });
+    }
     doc.text(`Subtotal: $${sale.subtotal.toFixed(2)}`, { align: 'right' });
     doc.text(`IVA (${process.env.IVA_RATE || 21}%): $${sale.tax.toFixed(2)}`, { align: 'right' });
     doc.fontSize(11).text(`TOTAL: $${sale.total.toFixed(2)}`, { align: 'right' });

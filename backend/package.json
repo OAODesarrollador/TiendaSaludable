@@ -8,7 +8,8 @@
     "dev": "nodemon server.js",
     "init-db": "node src/utils/init-db.js",
     "seed": "node src/utils/seed.js",
-    "setup": "npm run init-db && npm run seed"
+    "setup": "npm run init-db && npm run seed",
+    "test:smoke": "node ./smoke-test.js"
   },
   "keywords": [
     "pos",
@@ -41,5 +42,18 @@
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
+  },
+  "nodemonConfig": {
+    "watch": [
+      "server.js",
+      "src"
+    ],
+    "ext": "js,mjs,cjs,json",
+    "ignore": [
+      "database/*.db",
+      "database/*.db-*",
+      "src/config/backups/**",
+      ".tmp-smoke/**"
+    ]
   }
 }

@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { salesAPI } from '../services/api';
 import { toast } from 'react-toastify';
 import { Eye, Download, Search, IterationCw } from 'lucide-react';
 import axios from 'axios';
 import { formatFechaHoraAR,  getCurrentARDate } from '../config/timezoneF';
+import AppModal from '../components/AppModal';
 
 
 const Sales = () => {
@@ -349,44 +349,14 @@ const printRefundTicket = (refund) => {
   const DetailModal = () => {
     if (!showModal || !selectedSale) return null;
 
-    return createPortal(
-      <div 
-        className="fixed inset-0 bg-black/50 flex items-center justify-center p-4"
-        style={{ 
-          zIndex: 99999,
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0
-        }}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) {
-            setShowModal(false);
-            setSelectedSale(null);
-          }
-        }}
+    return (
+      <AppModal
+        open={showModal && selectedSale}
+        onClose={() => { setShowModal(false); setSelectedSale(null); }}
+        title={`Detalle de Venta #${selectedSale.id}`}
+        size="lg"
+        bodyClassName="max-h-[78vh] overflow-y-auto"
       >
-        <div 
-          className="bg-white rounded-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto shadow-2xl"
-          style={{ 
-            position: 'relative',
-            zIndex: 100000
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold">Detalle de Venta #{selectedSale.id}</h2>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => { setShowModal(false); setSelectedSale(null); }}
-                className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-
           {/* Información general */}
           <div className="bg-gray-50 rounded-lg p-4 mb-6">
             <div className="grid grid-cols-2 gap-4">
@@ -500,9 +470,7 @@ const printRefundTicket = (refund) => {
               </div>
             </>
           )}
-        </div>
-      </div>,
-      document.body
+      </AppModal>
     );
   };
 
@@ -510,41 +478,14 @@ const printRefundTicket = (refund) => {
   const RefundModal = () => {
     if (!showRefundModal) return null;
 
-    return createPortal(
-      <div 
-        className="fixed inset-0 bg-black/50 flex items-center justify-center p-4"
-        style={{ 
-          zIndex: 99999,
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0
-        }}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) {
-            setShowRefundModal(false);
-          }
-        }}
+    return (
+      <AppModal
+        open={showRefundModal}
+        onClose={() => setShowRefundModal(false)}
+        title={`Crear Nota de Crédito - Venta #${selectedSale?.id}`}
+        size="lg"
+        bodyClassName="max-h-[78vh] overflow-y-auto"
       >
-        <div 
-          className="bg-white rounded-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto shadow-2xl"
-          style={{ 
-            position: 'relative',
-            zIndex: 100000
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-xl font-bold">Crear Nota de Crédito - Venta #{selectedSale?.id}</h3>
-            <button 
-              onClick={() => setShowRefundModal(false)} 
-              className="text-gray-500 hover:text-gray-700 text-2xl leading-none"
-            >
-              ✕
-            </button>
-          </div>
-
           <p className="text-sm text-gray-600 mb-4">Seleccioná los productos y cantidades a devolver. Se actualizará el stock automáticamente.</p>
 
           <div className="space-y-3">
@@ -601,9 +542,7 @@ const printRefundTicket = (refund) => {
               Cancelar
             </button>
           </div>
-        </div>
-      </div>,
-      document.body
+      </AppModal>
     );
   };
 

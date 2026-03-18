@@ -78,7 +78,7 @@ const Reports = () => {
     }
   };
 
-  const handleExportCSV = async () => {
+  const handleExportExcel = async () => {
     try {
       const params = {};
       if (filters.period) params.period = filters.period;
@@ -90,25 +90,25 @@ const Reports = () => {
 
       let response;
       if (filters.reportType === 'expiring') {
-        response = await reportsAPI.exportExpiringCSV(params);
+        response = await reportsAPI.exportExpiringExcel(params);
       } else {
-        response = await reportsAPI.exportCSV(params);
+        response = await reportsAPI.exportExcel(params);
       }
 
-      const blob = new Blob([response.data], { type: 'text/csv' });
+      const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
       link.download =
         filters.reportType === 'expiring'
-          ? `reporte_vencimientos_${Date.now()}.csv`
-          : `reporte_ventas_${Date.now()}.csv`;
+          ? `reporte_vencimientos_${Date.now()}.xlsx`
+          : `reporte_ventas_${Date.now()}.xlsx`;
       link.click();
       window.URL.revokeObjectURL(url);
-      toast.success('Reporte CSV descargado');
+      toast.success('Reporte Excel descargado');
     } catch (error) {
-      console.error('Error exportando CSV:', error);
-      toast.error('Error al exportar CSV');
+      console.error('Error exportando Excel:', error);
+      toast.error('Error al exportar Excel');
     }
   };
 
@@ -313,11 +313,11 @@ const handleExportPDF = async () => {
       {reportData && (
         <div className="flex gap-4">
           <button
-            onClick={handleExportCSV}
+            onClick={handleExportExcel}
             className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
           >
             <Download size={20} />
-            Exportar CSV
+            Exportar Excel
           </button>
           <button
             onClick={handleExportPDF}

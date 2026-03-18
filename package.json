@@ -3,6 +3,14 @@
   "private": true,
   "description": "Meta proyecto: usar start.bat para instalar/ejecutar",
   "license": "MIT",
+  "scripts": {
+    "start": "npm run dev",
+    "dev": "node scripts/dev.js",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "test:smoke": "npm --prefix backend run test:smoke"
+  },
   "dependencies": {
     "@ericblade/quagga2": "^1.8.4",
     "exceljs": "^4.4.0"

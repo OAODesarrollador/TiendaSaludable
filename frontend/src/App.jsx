@@ -21,7 +21,10 @@ import ActualizarCoeficiente from './components/ActualizarCoeficiente';
 import ReporteVentas from "./pages/reportes/ReporteVentas";
 import ReporteVencimientos from "./pages/reportes/ReporteVencimineto";
 import ReporteDescuentos from "./pages/reportes/ReporteDescuentos";
+import ReporteProductos from "./pages/reportes/ReporteProductos";
 import Caja from "./pages/caja";
+
+
 
 
 // Componente de ruta protegida
@@ -32,7 +35,12 @@ const PrivateRoute = ({ children }) => {
 
 function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter
+      future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true
+      }}
+    >
       <ToastContainer
         position="top-right"
         autoClose={3000}
@@ -67,6 +75,7 @@ function App() {
             <Route path="/reportes/ventas" element={<ReporteVentas />} />
             <Route path="/reportes/vencimientos" element={<ReporteVencimientos />} />
             <Route path="/reportes/descuentos" element={<ReporteDescuentos />} />
+            <Route path="/reportes/productos" element={<ReporteProductos />} />
             <Route path="/caja" element={<Caja />} />
 
             {/* (Opcional) Si alguien navega a /reports, redirigimos a /reportes/ventas */}

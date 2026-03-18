@@ -36,20 +36,20 @@ const ReporteVencimientos = () => {
     }
   };
 
-  const handleExportCSV = async () => {
+  const handleExportExcel = async () => {
     try {
-      const res = await reportsAPI.exportExpiringCSV(filters);
-      const blob = new Blob([res.data], { type: "text/csv" });
+      const res = await reportsAPI.exportExpiringExcel(filters);
+      const blob = new Blob([res.data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `reporte_vencimientos_${Date.now()}.csv`;
+      a.download = `reporte_vencimientos_${Date.now()}.xlsx`;
       a.click();
       window.URL.revokeObjectURL(url);
-      toast.success("CSV descargado correctamente");
+      toast.success("Excel descargado correctamente");
     } catch (error) {
       console.error(error);
-      toast.error("Error exportando CSV");
+      toast.error("Error exportando Excel");
     }
   };
 
@@ -129,8 +129,8 @@ const ReporteVencimientos = () => {
         <>
           {/* ===== BOTONES DE EXPORTACIÓN ===== */}
           <div className="d-flex gap-3 mb-3">
-            <button onClick={handleExportCSV} className="btn btn-success fw-semibold">
-              <Download size={18} /> CSV
+            <button onClick={handleExportExcel} className="btn btn-success fw-semibold">
+              <Download size={18} /> Excel
             </button>
             <button onClick={handleExportPDF} className="btn btn-danger fw-semibold">
               <FileText size={18} /> PDF

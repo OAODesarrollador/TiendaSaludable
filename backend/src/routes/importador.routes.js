@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs'); // ← AÑADIR ESTA LÍNEA
 const importController = require('../controllers/import.controller');
+const { verifyToken, isAdmin } = require('../middleware/auth');
 
 const uploadDir = path.join(__dirname, '../uploads');
 
@@ -23,13 +24,15 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-router.post('/', upload.single('file'), importController.importCsv);
+router.post('/', verifyToken, isAdmin, upload.single('file'), importController.importCsv);
 router.post(
   "/update-prices-matched",
+  verifyToken,
+  isAdmin,
   upload.single("file"),
   importController.updatePricesMatched
 );
-router.post("/preview", upload.single("file"), importController.previewCsv);
+router.post("/preview", verifyToken, isAdmin, upload.single("file"), importController.previewCsv);
 
 
 module.exports = router;

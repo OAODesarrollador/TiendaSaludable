@@ -14,6 +14,7 @@ const ReportesDescuentos = () => {
   });
   const [loading, setLoading] = useState(false);
   const [chartUrl, setChartUrl] = useState(null);
+
   useEffect(() => {
     generateReport();
   }, []);
@@ -61,20 +62,20 @@ const ReportesDescuentos = () => {
 };
 
   // === EXPORTAR CSV ===
-  const handleExportCSV = async () => {
+  const handleExportExcel = async () => {
     try {
-      const res = await reportsAPI.exportDiscountCSV(filters);
-      const blob = new Blob([res.data], { type: "text/csv" });
+      const res = await reportsAPI.exportDiscountExcel(filters);
+      const blob = new Blob([res.data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `reporte_descuentos_${Date.now()}.csv`;
+      a.download = `reporte_descuentos_${Date.now()}.xlsx`;
       a.click();
       window.URL.revokeObjectURL(url);
-      toast.success("CSV exportado correctamente");
+      toast.success("Excel exportado correctamente");
     } catch (error) {
       console.error(error);
-      toast.error("Error exportando CSV");
+      toast.error("Error exportando Excel");
     }
   };
 
@@ -154,8 +155,8 @@ const ReportesDescuentos = () => {
         <>
           {/* ===== BOTONES EXPORT ===== */}
           <div className="d-flex gap-3 mb-3">
-            <button onClick={handleExportCSV} className="btn btn-success fw-semibold">
-              <Download size={18} /> CSV
+            <button onClick={handleExportExcel} className="btn btn-success fw-semibold">
+              <Download size={18} /> Excel
             </button>
             <button onClick={handleExportPDF} className="btn btn-danger fw-semibold">
               <FileText size={18} /> PDF
@@ -171,6 +172,10 @@ const ReportesDescuentos = () => {
                   <th>ID Venta</th>
                   <th>Vendedor</th>
                   <th>Método de Pago</th>
+                  <th>Origen</th>
+                  <th>Desc. Ítems</th>
+                  <th>Desc. General</th>
+                  <th>Tipo General</th>
                   <th>Subtotal</th>
                   <th>Descuento</th>
                   <th>Total</th>
@@ -179,91 +184,85 @@ const ReportesDescuentos = () => {
               </thead>
 
               <tbody>
-                {reportData.data.map((sale, idx) => (
+                {reportData.data.map((sale, idx) => {
+                  const grossAmount = Number(sale.gross_amount || 0);
+                  const itemDiscountAmount = Number(sale.item_discount_total_amount || 0);
+                  const orderDiscountAmount = Number(sale.order_discount_amount || 0);
+                  const discountAmount = Number(sale.discount_total_amount || 0);
+                  const discountPercent =
+                    grossAmount > 0 ? ((discountAmount / grossAmount) * 100).toFixed(1) : "0.0";
+                  const originLabel =
+                    sale.discount_origin === "mixto"
+                      ? "Mixto"
+                      : sale.discount_origin === "general"
+                      ? "General"
+                      : "Por ítem";
+                  const orderDiscountTypeLabel =
+                    sale.order_discount_type === "percentage"
+                      ? "Porcentaje"
+                      : sale.order_discount_type === "fixed"
+                      ? "Monto fijo"
+                      : "—";
+
+                  return (
                   <tr key={idx}>
                     <td>{new Date(sale.created_at).toLocaleDateString("es-AR")}</td>
                     <td>{sale.id}</td>
                     <td>{sale.seller_name}</td>
                     <td>{sale.payment_method}</td>
-                    <td>${Number(sale.subtotal).toFixed(2)}</td>
-                    <td>${Number(sale.discount_total_amount).toFixed(2)}</td>
-                    <td>
-                    {Number(sale.gross_amount) > 0
-                        ? `${((Number(sale.discount_total_amount) / Number(sale.gross_amount)) * 100).toFixed(1)}%`
-                        : '0%'}
-                    </td>
-
+                    <td>{originLabel}</td>
+                    <td>${itemDiscountAmount.toFixed(2)}</td>
+                    <td>${orderDiscountAmount.toFixed(2)}</td>
+                    <td>{orderDiscountTypeLabel}</td>
+                    <td>${Number(sale.gross_amount || 0).toFixed(2)}</td>
+                    <td>${discountAmount.toFixed(2)}</td>
                     <td>${Number(sale.total).toFixed(2)}</td>
-                    <td>
-                      {sale.subtotal > 0
-                        ? `${((sale.discount / sale.subtotal) * 100).toFixed(1)}%`
-                        : "0%"}
-                    </td>
+                    <td>{discountPercent}%</td>
                   </tr>
-                ))}
+                )})}
               </tbody>
             </table>
           </div>
                 
           {/* ===== RESUMEN ===== */}
           <div className="mt-3 text-end flex  align-items-center">
-            {(() => {
-              const totalTickets = reportData.data.length;
-              const ticketsConDesc = reportData.data.filter((s) => s.discount > 0).length;
-              const porcentaje = totalTickets
-                ? ((ticketsConDesc / totalTickets) * 100).toFixed(2)
-                : 0;
-
-              const totalDescuentos = reportData.data.reduce(
-                (acc, s) => acc + (s.discount || 0),
-                0
-              );
-              
-              return (
-                <>
+            <>
                 <div className="mt-4 row align-items-center">
-  {/* 🟩 Columna 1: Gráfico */}
-  <div className="col-md-6 text-center">
-    {chartUrl && (
-      <>
-        <h5>Distribución de Ventas con Descuento</h5>
-        <img
-          src={chartUrl}
-          alt="Gráfico de descuentos"
-          style={{
-            maxWidth: "100%",
-            width: "350px",
-            border: "1px solid #ccc",
-            borderRadius: "8px",
-            padding: "10px",
-            backgroundColor: "#f9f9f9",
-          }}
-        />
-      </>
-    )}
-  </div>
+                  <div className="col-md-6 text-center">
+                    {chartUrl && (
+                      <>
+                        <h5>Distribución de Ventas con Descuento</h5>
+                        <img
+                          src={chartUrl}
+                          alt="Gráfico de descuentos"
+                          style={{
+                            maxWidth: "100%",
+                            width: "350px",
+                            border: "1px solid #ccc",
+                            borderRadius: "8px",
+                            padding: "10px",
+                            backgroundColor: "#f9f9f9",
+                          }}
+                        />
+                      </>
+                    )}
+                  </div>
 
-  {/* 🟦 Columna 2: Totales alineados en columna */}
-  <div className="col-md-6 d-flex flex-column align-items-start text-start">
-    <p className="fw-bold mb-2 text-success">
-      Total Ventas: {reportData.summary.total_tickets}
-    </p>
-    <p className="fw-bold mb-2 text-primary">
-      Ventas con Descuento: {reportData.summary.tickets_con_descuento} (
-      {reportData.summary.porcentaje_tickets_descuento}%)
-    </p>
-    <p className="fw-bold mb-0 text-danger">
-      Total Descontado: $
-      {Number(reportData.summary.total_descuentos || 0).toFixed(2)}
-    </p>
-  </div>
-</div>
-
-
-
-                </>
-              );
-            })()}
+                  <div className="col-md-6 d-flex flex-column align-items-start text-start">
+                    <p className="fw-bold mb-2 text-success">
+                      Total Ventas: {reportData.summary.total_tickets}
+                    </p>
+                    <p className="fw-bold mb-2 text-primary">
+                      Ventas con Descuento: {reportData.summary.tickets_con_descuento} (
+                      {reportData.summary.porcentaje_tickets_descuento}%)
+                    </p>
+                    <p className="fw-bold mb-0 text-danger">
+                      Total Descontado: $
+                      {Number(reportData.summary.total_descuentos || 0).toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+            </>
           </div>
           
 

@@ -7,6 +7,7 @@ import Barcode from 'react-barcode';
 import api from '../services/api';
 import ProductModal from '../components/ProductModal';
 import BarcodeScanner from '../components/BarcodeScanner';
+import AppModal from '../components/AppModal';
 import '../styles/Layout.css'
 
 const Products = () => {
@@ -37,6 +38,10 @@ const Products = () => {
   // Estados para el modal de impresión
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [printQuantity, setPrintQuantity] = useState(1);
+  const [showInfoModal, setShowInfoModal] = useState(false);
+  const [infoMessage, setInfoMessage] = useState('');
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [productToDelete, setProductToDelete] = useState(null);
 
   // Estado para el escáner de códigos de barras
   const [showScanner, setShowScanner] = useState(false);
@@ -250,7 +255,6 @@ const handleChange = async (e) => {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('¿Está seguro de eliminar este producto?')) return;
     try {
       await productsAPI.delete(id);
       toast.success('Producto eliminado');
@@ -261,6 +265,11 @@ const handleChange = async (e) => {
       console.error(error);
       toast.error('Error al eliminar producto');
     }
+  };
+
+  const requestDeleteProduct = (product) => {
+    setProductToDelete(product);
+    setShowDeleteModal(true);
   };
 
   // Función para abrir modal de impresión
@@ -443,41 +452,13 @@ const handleChange = async (e) => {
   const PrintModal = () => {
     if (!showPrintModal) return null;
 
-    return createPortal(
-      <div 
-        className="fixed inset-0 flex items-center justify-center p-4 bg-black/50"
-        style={{ 
-          zIndex: 99999,
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0
-        }}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) {
-            setShowPrintModal(false);
-          }
-        }}
+    return (
+      <AppModal
+        open={showPrintModal}
+        onClose={() => setShowPrintModal(false)}
+        title="Imprimir Etiquetas"
+        size="sm"
       >
-        <div 
-          className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl"
-          style={{ 
-            position: 'relative',
-            zIndex: 100000
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-2xl font-bold">Imprimir Etiquetas</h2>
-            <button
-              onClick={() => setShowPrintModal(false)}
-              className="text-gray-500 hover:text-gray-700 text-2xl leading-none"
-            >
-              ✕
-            </button>
-          </div>
-
           <div className="mb-6">
             <p className="text-gray-600 mb-4">
               <strong>Producto:</strong> {selectedProduct?.name}
@@ -510,9 +491,7 @@ const handleChange = async (e) => {
               Cancelar
             </button>
           </div>
-        </div>
-      </div>,
-      document.body
+      </AppModal>
     );
   };
 
@@ -561,7 +540,8 @@ const handleChange = async (e) => {
                     console.error('Respuesta de exportación:', text);
                     const msg = text || 'Error al exportar productos';
                     console.log('Mensaje de error:', msg);
-                    alert(msg);
+                    setInfoMessage(msg);
+                    setShowInfoModal(true);
                     return;
                   }
 
@@ -576,7 +556,8 @@ const handleChange = async (e) => {
                   window.URL.revokeObjectURL(url);
                 } catch (error) {
                   console.error('Error exportando Excel:', error);
-                  alert('No se pudo exportar el archivo');
+                  setInfoMessage('No se pudo exportar el archivo');
+                  setShowInfoModal(true);
                 }
               }}
               className="flex items-center gap-2 px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition"
@@ -703,7 +684,7 @@ const handleChange = async (e) => {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleDelete(p.id);
+                              requestDeleteProduct(p);
                             }}
                             className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition"
                             title="Eliminar"
@@ -799,6 +780,64 @@ const handleChange = async (e) => {
 
       {/* Modal de impresión */}
       <PrintModal />
+
+      <AppModal
+        open={showInfoModal}
+        onClose={() => setShowInfoModal(false)}
+        title="Información"
+        size="sm"
+        footer={
+          <button
+            onClick={() => setShowInfoModal(false)}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-white transition hover:bg-blue-700"
+          >
+            Entendido
+          </button>
+        }
+      >
+        <p className="whitespace-pre-wrap text-sm text-slate-700">{infoMessage}</p>
+      </AppModal>
+
+      <AppModal
+        open={showDeleteModal}
+        onClose={() => {
+          setShowDeleteModal(false);
+          setProductToDelete(null);
+        }}
+        title="Eliminar producto"
+        size="sm"
+        footer={
+          <>
+            <button
+              onClick={() => {
+                setShowDeleteModal(false);
+                setProductToDelete(null);
+              }}
+              className="rounded-lg bg-gray-200 px-4 py-2 text-gray-800 transition hover:bg-gray-300"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={async () => {
+                if (productToDelete?.id) {
+                  await handleDelete(productToDelete.id);
+                }
+                setShowDeleteModal(false);
+                setProductToDelete(null);
+              }}
+              className="rounded-lg bg-red-600 px-4 py-2 text-white transition hover:bg-red-700"
+            >
+              Confirmar
+            </button>
+          </>
+        }
+      >
+        <p className="whitespace-pre-wrap text-sm text-slate-700">
+          {`¿Está seguro de eliminar ${
+            productToDelete?.name ? `"${productToDelete.name}"` : 'este producto'
+          }?`}
+        </p>
+      </AppModal>
     </>
   );
 };

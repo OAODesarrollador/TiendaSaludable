@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { updatePricesMatched } from "../services/api";
 
+const API_URL = import.meta.env.VITE_API_URL || "/api";
+
 export default function ActualizarPrecios() {
   const [file, setFile] = useState(null);
   const [columns, setColumns] = useState([]);
@@ -19,10 +21,12 @@ export default function ActualizarPrecios() {
 
     const formData = new FormData();
     formData.append("file", selectedFile);
+    const token = localStorage.getItem("token");
 
     try {
-      const response = await fetch("http://localhost:5000/api/import/preview", {
+      const response = await fetch(`${API_URL}/import/preview`, {
         method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
       const result = await response.json();
