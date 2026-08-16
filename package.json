@@ -12,7 +12,6 @@
     "test:smoke": "npm --prefix backend run test:smoke"
   },
   "dependencies": {
-    "@ericblade/quagga2": "^1.8.4",
     "exceljs": "^4.4.0"
   }
 }

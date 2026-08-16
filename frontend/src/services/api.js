@@ -83,12 +83,20 @@ export const salesAPI = {
 export const reportsAPI = {
   // === Ventas ===
   getSalesReport: (params) => api.get('/reports/sales', { params }),
+  getMonthlySalesReport: (params) => api.get('/reports/sales/monthly', { params }),
+  getSalesAnalysisReport: (params) => api.get('/reports/sales/analysis', { params }),
+  exportSalesAnalysisExcel: (params) =>
+    api.get('/reports/sales/analysis/export/excel', { params, responseType: 'blob' }),
   exportCSV: (params) =>
     api.get('/reports/sales/export/csv', { params, responseType: 'blob' }),
   exportExcel: (params) =>
     api.get('/reports/sales/export/excel', { params, responseType: 'blob' }),
   exportPDF: (params) =>
     api.get('/reports/sales/export/pdf', { params, responseType: 'blob' }),
+  exportMonthlySalesExcel: (params) =>
+    api.get('/reports/sales/monthly/export/excel', { params, responseType: 'blob' }),
+  exportMonthlySalesPDF: (params) =>
+    api.get('/reports/sales/monthly/export/pdf', { params, responseType: 'blob' }),
 
   // === Vencimientos ===
   getExpiringProducts: (params) =>
@@ -137,6 +145,16 @@ export const reportsAPI = {
 
   exportProductsPDF: (params) =>
     api.get('/reports/products/export/pdf', {
+      params,
+      responseType: 'blob'
+    }),
+
+  getRestockExpensesReport: (params) =>
+    api.get('/reports/expenses/restock', { params }),
+  getRestockExpenseConcepts: (params) =>
+    api.get('/reports/expenses/restock/concepts', { params }),
+  exportRestockExpensesExcel: (params) =>
+    api.get('/reports/expenses/restock/export/excel', {
       params,
       responseType: 'blob'
     })

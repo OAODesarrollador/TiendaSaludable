@@ -4,6 +4,7 @@
   "description": "Frontend para sistema de gestión de tienda natural",
   "private": true,
   "dependencies": {
+    "@ericblade/quagga2": "^1.8.4",
     "axios": "^1.13.1",
     "bootstrap": "^5.3.8",
     "exceljs": "^4.4.0",

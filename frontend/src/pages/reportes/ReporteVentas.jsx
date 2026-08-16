@@ -7,17 +7,24 @@ import "../../styles/reportes.css";
 
 const ReporteVentas = () => {
   const [reportData, setReportData] = useState(null);
+  const [analysisData, setAnalysisData] = useState(null);
   const [categories, setCategories] = useState([]);
   const [filters, setFilters] = useState({
+    reportType: "detail",
     period: "month",
     start_date: "",
     end_date: "",
+    start_month: "",
+    end_month: "",
     category: ""
   });
   const [loading, setLoading] = useState(false);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisYear, setAnalysisYear] = useState(new Date().getFullYear());
 
   useEffect(() => {
     loadCategories();
+    loadSalesAnalysis();
     generateReport();
   }, []);
 
@@ -30,19 +37,73 @@ const ReporteVentas = () => {
     }
   };
 
-  const generateReport = async () => {
-    if (filters.period === "custom" && (!filters.start_date || !filters.end_date)) {
-      toast.warning("Debe seleccionar fechas válidas");
-      return;
+  const loadSalesAnalysis = async (year = analysisYear) => {
+    setAnalysisLoading(true);
+    try {
+      const res = await reportsAPI.getSalesAnalysisReport({ year });
+      setAnalysisData(res.data);
+    } catch (error) {
+      console.error(error);
+      toast.error(error?.response?.data?.error || "Error al generar análisis de ventas");
+    } finally {
+      setAnalysisLoading(false);
     }
+  };
+
+  const handleExportAnalysisExcel = async () => {
+    try {
+      const res = await reportsAPI.exportSalesAnalysisExcel({ year: analysisYear });
+      const blob = new Blob([res.data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `datos_a_analizar_ventas_${analysisYear}_${Date.now()}.xlsx`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success("Excel del panel descargado");
+    } catch (error) {
+      console.error(error);
+      toast.error(error?.response?.data?.error || "Error al exportar Excel del panel");
+    }
+  };
+
+  const generateReport = async () => {
+    if (filters.reportType === "monthly") {
+      if (!filters.start_month || !filters.end_month) {
+        toast.warning("Debe seleccionar mes/año de inicio y fin");
+        return;
+      }
+      if (filters.start_month >= filters.end_month) {
+        toast.warning("El mes inicial debe ser menor al mes final");
+        return;
+      }
+    } else {
+      if (filters.period === "custom" && (!filters.start_date || !filters.end_date)) {
+        toast.warning("Debe seleccionar fechas válidas");
+        return;
+      }
+      if (filters.period === "custom" && filters.start_date > filters.end_date) {
+        toast.warning("La fecha inicial debe ser menor o igual a la fecha final");
+        return;
+      }
+    }
+
     setLoading(true);
     try {
-      const params = { ...filters };
-      const res = await reportsAPI.getSalesReport(params);
+      const params = filters.reportType === "monthly"
+        ? {
+            start_month: filters.start_month,
+            end_month: filters.end_month,
+            category: filters.category
+          }
+        : { ...filters };
+      const res = filters.reportType === "monthly"
+        ? await reportsAPI.getMonthlySalesReport(params)
+        : await reportsAPI.getSalesReport(params);
       setReportData(res.data);
     } catch (error) {
       console.error(error);
-      toast.error("Error al generar reporte");
+      toast.error(error?.response?.data?.error || "Error al generar reporte");
     } finally {
       setLoading(false);
     }
@@ -50,12 +111,23 @@ const ReporteVentas = () => {
 
   const handleExportExcel = async () => {
     try {
-      const res = await reportsAPI.exportExcel(filters);
+      const params = filters.reportType === "monthly"
+        ? {
+            start_month: filters.start_month,
+            end_month: filters.end_month,
+            category: filters.category
+          }
+        : filters;
+      const res = filters.reportType === "monthly"
+        ? await reportsAPI.exportMonthlySalesExcel(params)
+        : await reportsAPI.exportExcel(params);
       const blob = new Blob([res.data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `reporte_ventas_${Date.now()}.xlsx`;
+      a.download = filters.reportType === "monthly"
+        ? `informe_ventas_mensuales_${Date.now()}.xlsx`
+        : `reporte_ventas_${Date.now()}.xlsx`;
       a.click();
       window.URL.revokeObjectURL(url);
       toast.success("Excel descargado");
@@ -67,8 +139,16 @@ const ReporteVentas = () => {
 
   const handleExportPDF = async () => {
     try {
-      const params = new URLSearchParams(filters);
-      const res = await reportsAPI.exportPDF(params, { responseType: "blob" });
+      const params = filters.reportType === "monthly"
+        ? new URLSearchParams({
+            start_month: filters.start_month,
+            end_month: filters.end_month,
+            category: filters.category
+          })
+        : new URLSearchParams(filters);
+      const res = filters.reportType === "monthly"
+        ? await reportsAPI.exportMonthlySalesPDF(params, { responseType: "blob" })
+        : await reportsAPI.exportPDF(params, { responseType: "blob" });
       const blob = new Blob([res.data], { type: "application/pdf" });
       const url = window.URL.createObjectURL(blob);
       window.open(url, "_blank");
@@ -84,6 +164,24 @@ const ReporteVentas = () => {
   const toNumber = (v) => (isNaN(Number(v)) ? 0 : Number(v));
   const grossAmount = (r) => toNumber(r.quantity) * toNumber(r.unit_price);
   const sum = (rows, pick) => (rows || []).reduce((a, r) => a + toNumber(pick(r)), 0);
+  const formatMetricValue = (metric) => {
+    const value = Number(metric.value || 0);
+    if (metric.type === "currency") {
+      return value.toLocaleString("es-AR", {
+        style: "currency",
+        currency: "ARS",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    }
+    if (metric.type === "integer") {
+      return value.toLocaleString("es-AR", { maximumFractionDigits: 0 });
+    }
+    return value.toLocaleString("es-AR", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+  };
 
   return (
     <div className="container-fluid py-4">
@@ -91,6 +189,20 @@ const ReporteVentas = () => {
 
       {/* Filtros */}
       <div className="row g-3 mb-4">
+        <div className="col-md-3">
+          <label className="form-label">Tipo de informe</label>
+          <select
+            name="reportType"
+            className="form-select"
+            value={filters.reportType}
+            onChange={handleChange}
+          >
+            <option value="detail">Detalle de ventas</option>
+            <option value="monthly">Totales mensuales</option>
+          </select>
+        </div>
+
+        {filters.reportType === "detail" && (
         <div className="col-md-3">
           <label className="form-label">Período</label>
           <select
@@ -106,8 +218,9 @@ const ReporteVentas = () => {
             <option value="custom">Personalizado</option>
           </select>
         </div>
+        )}
 
-        {filters.period === "custom" && (
+        {filters.reportType === "detail" && filters.period === "custom" && (
           <>
             <div className="col-md-3">
               <label className="form-label">Desde</label>
@@ -126,6 +239,31 @@ const ReporteVentas = () => {
                 name="end_date"
                 className="form-control"
                 value={filters.end_date}
+                onChange={handleChange}
+              />
+            </div>
+          </>
+        )}
+
+        {filters.reportType === "monthly" && (
+          <>
+            <div className="col-md-3">
+              <label className="form-label">Desde mes/año</label>
+              <input
+                type="month"
+                name="start_month"
+                className="form-control"
+                value={filters.start_month}
+                onChange={handleChange}
+              />
+            </div>
+            <div className="col-md-3">
+              <label className="form-label">Hasta mes/año</label>
+              <input
+                type="month"
+                name="end_month"
+                className="form-control"
+                value={filters.end_month}
                 onChange={handleChange}
               />
             </div>
@@ -159,6 +297,58 @@ const ReporteVentas = () => {
         </div>
       </div>
 
+      <div className="sales-analysis-panel mb-4">
+        <div className="sales-analysis-header">
+          <div>
+            <h5 className="mb-1 fw-bold">Datos a analizar</h5>
+            <p className="mb-0 text-muted">
+              Abril y mayo {analysisData?.year || analysisYear}. Clientes equivale a tickets de venta.
+            </p>
+          </div>
+          <div className="sales-analysis-actions">
+            <input
+              type="number"
+              className="form-control"
+              min="2000"
+              max="2100"
+              value={analysisYear}
+              onChange={(e) => setAnalysisYear(e.target.value)}
+            />
+            <button
+              type="button"
+              className="btn btn-outline-primary fw-semibold"
+              onClick={() => loadSalesAnalysis(analysisYear)}
+              disabled={analysisLoading}
+            >
+              {analysisLoading ? "Calculando..." : "Actualizar"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-success fw-semibold"
+              onClick={handleExportAnalysisExcel}
+              disabled={analysisLoading}
+            >
+              <Download size={18} /> Excel
+            </button>
+          </div>
+        </div>
+
+        <div className="sales-analysis-grid">
+          {(analysisData?.metrics || []).map((metric) => (
+            <div className="sales-analysis-item" key={metric.key}>
+              <span>{metric.label}</span>
+              <strong>{formatMetricValue(metric)}</strong>
+            </div>
+          ))}
+          {analysisLoading && !analysisData && (
+            <div className="sales-analysis-empty">Calculando datos...</div>
+          )}
+          {!analysisLoading && !analysisData && (
+            <div className="sales-analysis-empty">No se pudieron cargar los datos.</div>
+          )}
+        </div>
+      </div>
+
       {reportData && (
         <>
           <div className="d-flex gap-3 mb-3">
@@ -170,6 +360,42 @@ const ReporteVentas = () => {
             </button>
           </div>
 
+          {filters.reportType === "monthly" ? (
+            <div className="table-scroll mt-3">
+              <table className="table table-bordered table-striped table-sticky table-header-green text-center">
+                <thead>
+                  <tr>
+                    <th>Mes</th>
+                    <th>Ventas</th>
+                    <th>Notas Crédito</th>
+                    <th>Unidades</th>
+                    <th>Importe Bruto</th>
+                    <th>Descuentos</th>
+                    <th>Total Ventas</th>
+                    <th>Total NC</th>
+                    <th>Total Neto</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reportData.data.map((r) => (
+                    <tr key={r.month_key}>
+                      <td>{r.label}</td>
+                      <td>{r.sales_count}</td>
+                      <td>{r.refunds_count}</td>
+                      <td>{Number(r.units || 0).toFixed(2)}</td>
+                      <td>${Number(r.gross_amount || 0).toFixed(2)}</td>
+                      <td>${Number(r.discounts || 0).toFixed(2)}</td>
+                      <td className="text-success">${Number(r.credit || 0).toFixed(2)}</td>
+                      <td className="text-danger">${Number(r.debit || 0).toFixed(2)}</td>
+                      <td className={Number(r.net_total || 0) >= 0 ? "text-primary fw-semibold" : "text-danger fw-semibold"}>
+                        ${Number(r.net_total || 0).toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
           <div className="table-scroll mt-3">
             <table className="table table-bordered table-striped table-sticky table-header-green text-center">
 
@@ -211,10 +437,31 @@ const ReporteVentas = () => {
               </tbody>
             </table>
           </div>
+          )}
 
           {/* Totales */}
           <div className="mt-3 text-end">
             {(() => {
+              if (filters.reportType === "monthly") {
+                const totals = reportData.totals || {};
+                return (
+                  <>
+                    <p className="fw-bold mb-0 text-success">
+                      Total Ventas: ${Number(totals.credit || 0).toFixed(2)}
+                    </p>
+                    <p className="fw-bold mb-0 text-danger">
+                      Total NC: ${Number(totals.debit || 0).toFixed(2)}
+                    </p>
+                    <p className="fw-bold mb-0 text-warning">
+                      Total Descuentos: ${Number(totals.discounts || 0).toFixed(2)}
+                    </p>
+                    <p className="fw-bold mt-1 text-primary">
+                      Total Neto: ${Number(totals.net_total || 0).toFixed(2)}
+                    </p>
+                  </>
+                );
+              }
+
               const totalDebe = sum(reportData.data, (r) => r.debit);
               const totalHaber = sum(reportData.data, (r) => r.credit);
               const totalDesc = sum(reportData.data, (r) =>

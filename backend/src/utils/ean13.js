@@ -1,5 +1,4 @@
 const JsBarcode = require('jsbarcode');
-const { createCanvas } = require('canvas');
 const fs = require('fs');
 const path = require('path');
 
@@ -74,6 +73,8 @@ const validateEAN13 = (ean13) => {
  */
 const generateBarcodeImage = (ean13, outputPath) => {
   try {
+    const { createCanvas } = require('canvas');
+
     // Crear canvas
     const canvas = createCanvas();
     

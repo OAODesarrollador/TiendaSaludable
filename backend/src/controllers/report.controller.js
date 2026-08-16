@@ -46,6 +46,112 @@ const toLatinoDate = (d) => {
   return `${day}-${month}-${year}`;
 };
 
+const isValidMonth = (value) => /^\d{4}-(0[1-9]|1[0-2])$/.test(String(value || '').trim());
+
+const monthLabel = (value) => {
+  if (!isValidMonth(value)) return String(value || '');
+  const [year, month] = value.split('-');
+  return `${month}/${year}`;
+};
+
+const monthBounds = (year, month) => {
+  const last = new Date(year, month, 0);
+  const pad = (value) => String(value).padStart(2, '0');
+
+  return {
+    start: `${year}-${pad(month)}-01`,
+    end: `${year}-${pad(month)}-${pad(last.getDate())}`,
+    daysInMonth: last.getDate()
+  };
+};
+
+const countWeekdayInMonth = (year, month, weekday) => {
+  const { daysInMonth } = monthBounds(year, month);
+  let count = 0;
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    if (new Date(year, month - 1, day).getDay() === weekday) count += 1;
+  }
+
+  return count;
+};
+
+function normalizeKeywordList(value) {
+  const raw = Array.isArray(value) ? value.join(',') : String(value || '');
+  return raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildRestockExpenseRange(query = {}, { allowEmpty = false } = {}) {
+  const currentYear = new Date().getFullYear();
+  const currentMonth = String(new Date().getMonth() + 1).padStart(2, '0');
+  const hasStartMonth = Object.prototype.hasOwnProperty.call(query, 'start_month');
+  const hasEndMonth = Object.prototype.hasOwnProperty.call(query, 'end_month');
+  const startMonth = isValidMonth(query.start_month)
+    ? query.start_month
+    : allowEmpty && hasStartMonth
+      ? null
+      : `${currentYear}-01`;
+  const endMonth = isValidMonth(query.end_month)
+    ? query.end_month
+    : allowEmpty && hasEndMonth
+      ? null
+      : `${currentYear}-${currentMonth}`;
+
+  if (allowEmpty && (!startMonth || !endMonth)) {
+    return { startMonth, endMonth, start: null, end: null };
+  }
+
+  if (startMonth > endMonth) {
+    const err = new Error('El mes inicial debe ser menor o igual al mes final.');
+    err.status = 400;
+    throw err;
+  }
+
+  const [startYear, startMonthNumber] = startMonth.split('-').map(Number);
+  const [endYear, endMonthNumber] = endMonth.split('-').map(Number);
+  const start = monthBounds(startYear, startMonthNumber).start;
+  const end = monthBounds(endYear, endMonthNumber).end;
+
+  return { startMonth, endMonth, start, end };
+}
+
+function buildRestockExpenseWhere(query = {}) {
+  const range = buildRestockExpenseRange(query);
+  const concept = String(query.concept || '').trim();
+  const keywords = normalizeKeywordList(query.keywords);
+  const params = [range.start, range.end];
+  const keywordConditions = [];
+
+  keywords.forEach((keyword) => {
+    keywordConditions.push('LOWER(m.concept) LIKE LOWER(?)');
+    params.push(`%${keyword}%`);
+  });
+
+  const keywordSql = keywordConditions.length
+    ? `AND (${keywordConditions.join(' OR ')})`
+    : '';
+  const conceptSql = concept ? 'AND m.concept = ?' : '';
+  if (concept) params.push(concept);
+
+  return {
+    ...range,
+    concept,
+    keywords,
+    where: `
+      m.type = 'egreso'
+      AND DATE(COALESCE(m.date, s.date, m.created_at)) BETWEEN DATE(?) AND DATE(?)
+      ${keywordSql}
+      ${conceptSql}
+      AND LOWER(COALESCE(m.concept, '')) NOT LIKE 'nota de crédito #%'
+      AND LOWER(COALESCE(m.concept, '')) NOT LIKE 'nota de credito #%'
+    `,
+    params
+  };
+}
+
 async function sendWorkbook(res, workbook, fileName) {
   res.setHeader(
     'Content-Type',
@@ -431,6 +537,229 @@ const params = [...sparams, ...sparams];
 return { sql, params, period: normalized };
 };
 
+function buildMonthlySalesQuery(query) {
+  const { start_month, end_month, category, product_id } = query;
+  const startMonth = String(start_month || '').trim();
+  const endMonth = String(end_month || '').trim();
+
+  if (!isValidMonth(startMonth) || !isValidMonth(endMonth)) {
+    const err = new Error('Debe especificar start_month y end_month en formato YYYY-MM.');
+    err.status = 422;
+    throw err;
+  }
+
+  if (startMonth >= endMonth) {
+    const err = new Error('El mes inicial debe ser menor al mes final.');
+    err.status = 422;
+    throw err;
+  }
+
+  const filters = [];
+  const filterParams = [];
+
+  if (category) {
+    filters.push('category = ?');
+    filterParams.push(category);
+  }
+  if (product_id) {
+    filters.push('product_id = ?');
+    filterParams.push(product_id);
+  }
+
+  const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+
+  const sql = `
+    WITH ledger AS (
+      SELECT
+        substr(s.created_at, 1, 7) AS month_key,
+        'SALE' AS entry_type,
+        s.id AS doc_id,
+        si.product_id AS product_id,
+        si.quantity AS quantity,
+        si.unit_price AS unit_price,
+        si.subtotal AS item_subtotal,
+        ((si.quantity * si.unit_price) - si.subtotal) AS item_discount_amount,
+        p.category AS category
+      FROM sales s
+      INNER JOIN sale_items si ON s.id = si.sale_id
+      LEFT JOIN products p ON si.product_id = p.id
+      WHERE substr(s.created_at, 1, 7) BETWEEN ? AND ?
+
+      UNION ALL
+
+      SELECT
+        substr(r.created_at, 1, 7) AS month_key,
+        'REFUND' AS entry_type,
+        r.id AS doc_id,
+        ri.product_id AS product_id,
+        (ri.quantity * -1) AS quantity,
+        ri.unit_price AS unit_price,
+        (ri.subtotal * -1) AS item_subtotal,
+        (((ri.quantity * ri.unit_price) - ri.subtotal) * -1) AS item_discount_amount,
+        p.category AS category
+      FROM refunds r
+      INNER JOIN refund_items ri ON r.id = ri.refund_id
+      LEFT JOIN products p ON ri.product_id = p.id
+      WHERE substr(r.created_at, 1, 7) BETWEEN ? AND ?
+    )
+    SELECT
+      month_key,
+      SUM(CASE WHEN entry_type = 'SALE' THEN 1 ELSE 0 END) AS sale_lines,
+      COUNT(DISTINCT CASE WHEN entry_type = 'SALE' THEN doc_id END) AS sales_count,
+      COUNT(DISTINCT CASE WHEN entry_type = 'REFUND' THEN doc_id END) AS refunds_count,
+      SUM(quantity) AS units,
+      SUM(quantity * unit_price) AS gross_amount,
+      SUM(ABS(item_discount_amount)) AS discounts,
+      SUM(CASE WHEN item_subtotal > 0 THEN item_subtotal ELSE 0 END) AS credit,
+      SUM(CASE WHEN item_subtotal < 0 THEN ABS(item_subtotal) ELSE 0 END) AS debit,
+      SUM(item_subtotal) AS net_total
+    FROM ledger
+    ${where}
+    GROUP BY month_key
+    ORDER BY month_key ASC
+  `;
+
+  return {
+    sql,
+    params: [startMonth, endMonth, startMonth, endMonth, ...filterParams],
+    startMonth,
+    endMonth
+  };
+}
+
+async function getSalesAnalysisMonth(year, month) {
+  const bounds = monthBounds(year, month);
+  const rows = await allAsync(
+    `
+      SELECT
+        COUNT(*) AS customers,
+        COALESCE(SUM(s.total), 0) AS total_sales,
+        SUM(
+          CASE
+            WHEN CAST(strftime('%H', s.created_at, 'localtime') AS INTEGER) < 14 THEN 1
+            ELSE 0
+          END
+        ) AS morning_customers,
+        SUM(
+          CASE
+            WHEN strftime('%w', s.created_at, 'localtime') = '6' THEN 1
+            ELSE 0
+          END
+        ) AS saturday_customers
+      FROM sales s
+      WHERE DATE(s.created_at, 'localtime') BETWEEN DATE(?) AND DATE(?)
+    `,
+    [bounds.start, bounds.end]
+  );
+  const row = rows[0] || {};
+  const saturdayCount = countWeekdayInMonth(year, month, 6);
+
+  return {
+    month,
+    label: month === 4 ? 'abril' : 'mayo',
+    start_date: bounds.start,
+    end_date: bounds.end,
+    days_in_month: bounds.daysInMonth,
+    saturdays_in_month: saturdayCount,
+    total_sales: Number(row.total_sales || 0),
+    customers: Number(row.customers || 0),
+    morning_customers: Number(row.morning_customers || 0),
+    saturday_customers: Number(row.saturday_customers || 0),
+    daily_sales_average: bounds.daysInMonth > 0 ? Number(row.total_sales || 0) / bounds.daysInMonth : 0,
+    daily_customers_average: bounds.daysInMonth > 0 ? Number(row.customers || 0) / bounds.daysInMonth : 0,
+    morning_customers_average: bounds.daysInMonth > 0 ? Number(row.morning_customers || 0) / bounds.daysInMonth : 0,
+    saturday_customers_average: saturdayCount > 0 ? Number(row.saturday_customers || 0) / saturdayCount : 0
+  };
+}
+
+async function buildSalesAnalysisData(query = {}) {
+  const requestedYear = Number(query.year || new Date().getFullYear());
+  const year = Number.isInteger(requestedYear) && requestedYear >= 2000 && requestedYear <= 2100
+    ? requestedYear
+    : new Date().getFullYear();
+
+  const [april, may] = await Promise.all([
+    getSalesAnalysisMonth(year, 4),
+    getSalesAnalysisMonth(year, 5)
+  ]);
+
+  const metrics = [
+    {
+      key: 'daily_sales_average_april',
+      label: 'Venta promedio diario de abril',
+      value: april.daily_sales_average,
+      type: 'currency'
+    },
+    {
+      key: 'daily_sales_average_may',
+      label: 'Venta promedio diario de mayo',
+      value: may.daily_sales_average,
+      type: 'currency'
+    },
+    {
+      key: 'daily_customers_average_april',
+      label: 'Cantidad de clientes por día abril',
+      value: april.daily_customers_average,
+      type: 'number'
+    },
+    {
+      key: 'daily_customers_average_may',
+      label: 'Cantidad de clientes por día mayo',
+      value: may.daily_customers_average,
+      type: 'number'
+    },
+    {
+      key: 'morning_customers_april',
+      label: 'Cantidad de clientes por la mañana abril',
+      value: april.morning_customers,
+      type: 'integer'
+    },
+    {
+      key: 'morning_customers_may',
+      label: 'Cantidad de clientes por la mañana mayo',
+      value: may.morning_customers,
+      type: 'integer'
+    },
+    {
+      key: 'morning_customers_average_april',
+      label: 'Promedio de clientes por la mañana abril',
+      value: april.morning_customers_average,
+      type: 'number'
+    },
+    {
+      key: 'morning_customers_average_may',
+      label: 'Promedio de clientes por la mañana mayo',
+      value: may.morning_customers_average,
+      type: 'number'
+    },
+    {
+      key: 'saturday_customers_average_april',
+      label: 'Cantidad clientes promedio sábados de abril',
+      value: april.saturday_customers_average,
+      type: 'number'
+    },
+    {
+      key: 'saturday_customers_average_may',
+      label: 'Cantidad clientes promedio sábados de mayo',
+      value: may.saturday_customers_average,
+      type: 'number'
+    }
+  ];
+
+  return {
+    year,
+    months: { april, may },
+    metrics,
+    assumptions: {
+      customer_unit: 'ticket de venta',
+      morning_until_hour: 14,
+      daily_average_base: 'días calendario del mes',
+      morning_average_base: 'días calendario del mes',
+      saturday_average_base: 'sábados calendario del mes'
+    }
+  };
+}
+
 // Vencimientos: arma SQL + params según req.query
 function buildExpiringQuery(query) {
   const period = normalizePeriod(query.period);
@@ -784,6 +1113,256 @@ doc.end(); // 🚨 importantísimo: cierra el stream
     console.error('Error exportando PDF de ventas:', error);
     const code = error.status || 500;
     return res.status(code).json({ error: error.message || 'Error al exportar PDF de ventas' });
+  }
+};
+
+const getMonthlySalesReport = async (req, res) => {
+  try {
+    const { sql, params, startMonth, endMonth } = buildMonthlySalesQuery(req.query);
+    const rows = await allAsync(sql, params);
+    const toNumber = (v) => (v == null ? 0 : Number(v) || 0);
+
+    const data = rows.map((row) => ({
+      ...row,
+      label: monthLabel(row.month_key),
+      sales_count: toNumber(row.sales_count),
+      refunds_count: toNumber(row.refunds_count),
+      units: toNumber(row.units),
+      gross_amount: toNumber(row.gross_amount),
+      discounts: toNumber(row.discounts),
+      credit: toNumber(row.credit),
+      debit: toNumber(row.debit),
+      net_total: toNumber(row.net_total)
+    }));
+
+    const totals = data.reduce((acc, row) => {
+      acc.sales_count += row.sales_count;
+      acc.refunds_count += row.refunds_count;
+      acc.units += row.units;
+      acc.gross_amount += row.gross_amount;
+      acc.discounts += row.discounts;
+      acc.credit += row.credit;
+      acc.debit += row.debit;
+      acc.net_total += row.net_total;
+      return acc;
+    }, {
+      sales_count: 0,
+      refunds_count: 0,
+      units: 0,
+      gross_amount: 0,
+      discounts: 0,
+      credit: 0,
+      debit: 0,
+      net_total: 0
+    });
+
+    return res.json({
+      period: {
+        start_month: startMonth,
+        end_month: endMonth,
+        label: `${monthLabel(startMonth)} a ${monthLabel(endMonth)}`
+      },
+      data,
+      totals
+    });
+  } catch (error) {
+    console.error('Error generando reporte mensual de ventas:', error);
+    const code = error.status || 500;
+    return res.status(code).json({ error: error.message || 'Error al generar reporte mensual de ventas' });
+  }
+};
+
+const getSalesAnalysisReport = async (req, res) => {
+  try {
+    return res.json(await buildSalesAnalysisData(req.query));
+  } catch (error) {
+    console.error('Error generando panel de análisis de ventas:', error);
+    return res.status(error.status || 500).json({
+      error: error.message || 'Error al generar panel de análisis de ventas'
+    });
+  }
+};
+
+const exportSalesAnalysisExcel = async (req, res) => {
+  try {
+    const analysis = await buildSalesAnalysisData(req.query);
+    const formatValue = (metric) => {
+      const value = Number(metric.value || 0);
+      if (metric.type === 'currency') return Number(value.toFixed(2));
+      if (metric.type === 'integer') return Math.round(value);
+      return Number(value.toFixed(2));
+    };
+
+    const workbook = buildProfessionalWorkbook({
+      title: 'Datos a Analizar - Ventas',
+      subtitle: `Abril y mayo ${analysis.year} | Generado: ${new Date().toLocaleString('es-AR')}`,
+      columns: [
+        { header: 'Dato', key: 'label', width: 48 },
+        { header: 'Valor', key: 'value', width: 18 }
+      ],
+      rows: analysis.metrics.map((metric) => ({
+        label: metric.label,
+        value: formatValue(metric)
+      })),
+      summaryRows: [
+        ['Clientes', 'Tickets de venta'],
+        ['Mañana', 'Antes de las 14:00'],
+        ['Promedio diario', 'Días calendario del mes'],
+        ['Promedio mañana', 'Días calendario del mes'],
+        ['Promedio sábados', 'Sábados calendario del mes']
+      ]
+    });
+
+    const worksheet = workbook.getWorksheet('Reporte');
+    analysis.metrics.forEach((metric, index) => {
+      const cell = worksheet.getRow(5 + index).getCell(2);
+      if (metric.type === 'currency') cell.numFmt = '$ #,##0.00';
+      else if (metric.type === 'integer') cell.numFmt = '#,##0';
+      else cell.numFmt = '#,##0.00';
+    });
+
+    return sendWorkbook(res, workbook, `datos_a_analizar_ventas_${analysis.year}_${Date.now()}.xlsx`);
+  } catch (error) {
+    console.error('Error exportando Excel del panel de análisis de ventas:', error);
+    return res.status(error.status || 500).json({
+      error: error.message || 'Error al exportar Excel del panel de análisis de ventas'
+    });
+  }
+};
+
+const exportMonthlySalesExcel = async (req, res) => {
+  try {
+    const { sql, params, startMonth, endMonth } = buildMonthlySalesQuery(req.query);
+    const rows = await allAsync(sql, params);
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'No hay datos para exportar.' });
+    }
+
+    const toNumber = (v) => (v == null ? 0 : Number(v) || 0);
+    const summary = rows.reduce((acc, row) => {
+      acc.credit += toNumber(row.credit);
+      acc.debit += toNumber(row.debit);
+      acc.discounts += toNumber(row.discounts);
+      acc.net_total += toNumber(row.net_total);
+      return acc;
+    }, { credit: 0, debit: 0, discounts: 0, net_total: 0 });
+
+    const workbook = buildProfessionalWorkbook({
+      title: 'Informe de Ventas - Totales Mensuales',
+      subtitle: `Período: ${monthLabel(startMonth)} a ${monthLabel(endMonth)} | Generado: ${new Date().toLocaleString('es-AR')}`,
+      columns: [
+        { header: 'Mes', key: 'mes' },
+        { header: 'Ventas', key: 'ventas' },
+        { header: 'Notas Crédito', key: 'notas_credito' },
+        { header: 'Unidades', key: 'unidades' },
+        { header: 'Importe Bruto', key: 'importe_bruto' },
+        { header: 'Descuentos', key: 'descuentos' },
+        { header: 'Total Ventas', key: 'total_ventas' },
+        { header: 'Total NC', key: 'total_nc' },
+        { header: 'Total Neto', key: 'total_neto' }
+      ],
+      rows: rows.map((row) => ({
+        mes: monthLabel(row.month_key),
+        ventas: toNumber(row.sales_count),
+        notas_credito: toNumber(row.refunds_count),
+        unidades: toNumber(row.units),
+        importe_bruto: toNumber(row.gross_amount),
+        descuentos: toNumber(row.discounts),
+        total_ventas: toNumber(row.credit),
+        total_nc: toNumber(row.debit),
+        total_neto: toNumber(row.net_total)
+      })),
+      summaryRows: [
+        ['Total Ventas', summary.credit.toFixed(2)],
+        ['Total Notas de Crédito', summary.debit.toFixed(2)],
+        ['Total Descuentos', summary.discounts.toFixed(2)],
+        ['Total Neto', summary.net_total.toFixed(2)]
+      ]
+    });
+
+    return sendWorkbook(res, workbook, `informe_ventas_mensuales_${Date.now()}.xlsx`);
+  } catch (error) {
+    console.error('Error exportando Excel mensual de ventas:', error);
+    const code = error.status || 500;
+    return res.status(code).json({ error: error.message || 'Error al exportar Excel mensual de ventas' });
+  }
+};
+
+const exportMonthlySalesPDF = async (req, res) => {
+  try {
+    const { sql, params, startMonth, endMonth } = buildMonthlySalesQuery(req.query);
+    const rows = await allAsync(sql, params);
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'No hay datos para exportar.' });
+    }
+
+    const toNumber = (v) => (v == null ? 0 : Number(v) || 0);
+    const totals = rows.reduce((acc, row) => {
+      acc.credit += toNumber(row.credit);
+      acc.debit += toNumber(row.debit);
+      acc.discounts += toNumber(row.discounts);
+      acc.net_total += toNumber(row.net_total);
+      return acc;
+    }, { credit: 0, debit: 0, discounts: 0, net_total: 0 });
+
+    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename=informe_ventas_mensuales_${Date.now()}.pdf`);
+    doc.pipe(res);
+
+    doc.fontSize(18).text('Informe de Ventas - Totales Mensuales', { align: 'center' });
+    doc.moveDown(0.5);
+    doc.fontSize(10).text(`Período: ${monthLabel(startMonth)} a ${monthLabel(endMonth)}`, { align: 'center' });
+    doc.text(`Generado: ${new Date().toLocaleString('es-AR')}`, { align: 'center' });
+    doc.moveDown();
+
+    const headers = ['Mes', 'Ventas', 'NC', 'Unid.', 'Bruto', 'Desc.', 'Total Vtas.', 'Total NC', 'Neto'];
+    const colWidths = [50, 42, 34, 42, 58, 55, 65, 58, 58];
+    const startX = doc.x;
+    let y = doc.y;
+
+    doc.font('Helvetica-Bold').fontSize(8);
+    headers.forEach((header, index) => {
+      const x = startX + colWidths.slice(0, index).reduce((acc, width) => acc + width, 0);
+      doc.text(header, x, y, { width: colWidths[index], align: 'center' });
+    });
+    doc.moveDown(0.8);
+    doc.font('Helvetica').fontSize(8);
+
+    rows.forEach((row) => {
+      y = doc.y;
+      const values = [
+        monthLabel(row.month_key),
+        toNumber(row.sales_count),
+        toNumber(row.refunds_count),
+        toNumber(row.units).toFixed(2),
+        `$${toNumber(row.gross_amount).toFixed(2)}`,
+        `$${toNumber(row.discounts).toFixed(2)}`,
+        `$${toNumber(row.credit).toFixed(2)}`,
+        `$${toNumber(row.debit).toFixed(2)}`,
+        `$${toNumber(row.net_total).toFixed(2)}`
+      ];
+
+      values.forEach((value, index) => {
+        const x = startX + colWidths.slice(0, index).reduce((acc, width) => acc + width, 0);
+        doc.text(String(value), x, y, { width: colWidths[index], align: 'center' });
+      });
+      doc.moveDown(0.45);
+    });
+
+    doc.moveDown();
+    doc.font('Helvetica-Bold').fontSize(10);
+    doc.text(`Total Ventas: $${totals.credit.toFixed(2)}`, { align: 'right' });
+    doc.text(`Total Notas de Crédito: $${totals.debit.toFixed(2)}`, { align: 'right' });
+    doc.text(`Total Descuentos: $${totals.discounts.toFixed(2)}`, { align: 'right' });
+    doc.text(`Total Neto: $${totals.net_total.toFixed(2)}`, { align: 'right' });
+    doc.end();
+  } catch (error) {
+    console.error('Error exportando PDF mensual de ventas:', error);
+    const code = error.status || 500;
+    return res.status(code).json({ error: error.message || 'Error al exportar PDF mensual de ventas' });
   }
 };
 
@@ -1942,16 +2521,250 @@ const exportProductsListingPDF = async (req, res) => {
   }
 };
 
+const getRestockExpensesReport = async (req, res) => {
+  try {
+    const filter = buildRestockExpenseWhere(req.query);
+
+    const monthlyRows = await allAsync(
+      `
+      SELECT
+        strftime('%Y-%m', DATE(COALESCE(m.date, s.date, m.created_at))) AS month_key,
+        SUM(ABS(COALESCE(m.amount, 0))) AS total,
+        COUNT(*) AS movements_count
+      FROM cash_movements m
+      LEFT JOIN cash_sessions s ON s.id = m.session_id
+      WHERE ${filter.where}
+      GROUP BY month_key
+      ORDER BY month_key ASC
+      `,
+      filter.params
+    );
+
+    const detailRows = await allAsync(
+      `
+      SELECT
+        m.id,
+        DATE(COALESCE(m.date, s.date, m.created_at)) AS date,
+        strftime('%Y-%m', DATE(COALESCE(m.date, s.date, m.created_at))) AS month_key,
+        m.concept,
+        ABS(COALESCE(m.amount, 0)) AS amount,
+        m.payment_method
+      FROM cash_movements m
+      LEFT JOIN cash_sessions s ON s.id = m.session_id
+      WHERE ${filter.where}
+      ORDER BY DATE(COALESCE(m.date, s.date, m.created_at)) ASC, m.created_at ASC, m.id ASC
+      `,
+      filter.params
+    );
+
+    const totalsByMonth = new Map(
+      monthlyRows.map((row) => [
+        row.month_key,
+        {
+          month_key: row.month_key,
+          label: monthLabel(row.month_key),
+          total: Number(row.total || 0),
+          movements_count: Number(row.movements_count || 0)
+        }
+      ])
+    );
+
+    const data = [];
+    let cursorYear = Number(filter.startMonth.slice(0, 4));
+    let cursorMonth = Number(filter.startMonth.slice(5, 7));
+    const endKey = filter.endMonth;
+
+    while (`${cursorYear}-${String(cursorMonth).padStart(2, '0')}` <= endKey) {
+      const monthKey = `${cursorYear}-${String(cursorMonth).padStart(2, '0')}`;
+      data.push(totalsByMonth.get(monthKey) || {
+        month_key: monthKey,
+        label: monthLabel(monthKey),
+        total: 0,
+        movements_count: 0
+      });
+
+      cursorMonth += 1;
+      if (cursorMonth > 12) {
+        cursorMonth = 1;
+        cursorYear += 1;
+      }
+    }
+
+    const total = detailRows.reduce((acc, row) => acc + Number(row.amount || 0), 0);
+
+    return res.json({
+      range: {
+        start_month: filter.startMonth,
+        end_month: filter.endMonth,
+        start_date: filter.start,
+        end_date: filter.end
+      },
+      concept: filter.concept,
+      keywords: filter.keywords,
+      data,
+      details: detailRows.map((row) => ({
+        ...row,
+        amount: Number(row.amount || 0),
+        label: monthLabel(row.month_key)
+      })),
+      totals: {
+        total,
+        movements_count: detailRows.length
+      }
+    });
+  } catch (error) {
+    console.error('Error generando reporte de gastos de reposición:', error);
+    return res.status(error.status || 500).json({
+      error: error.message || 'Error generando reporte de gastos de reposición'
+    });
+  }
+};
+
+const getRestockExpenseConcepts = async (req, res) => {
+  try {
+    const filterRange = buildRestockExpenseRange(req.query, { allowEmpty: true });
+    const dateSql = filterRange.start && filterRange.end
+      ? 'AND DATE(COALESCE(m.date, s.date, m.created_at)) BETWEEN DATE(?) AND DATE(?)'
+      : '';
+    const params = filterRange.start && filterRange.end ? [filterRange.start, filterRange.end] : [];
+
+    const rows = await allAsync(
+      `
+      SELECT
+        m.concept,
+        COUNT(*) AS movements_count,
+        SUM(ABS(COALESCE(m.amount, 0))) AS total,
+        MIN(strftime('%Y-%m', DATE(COALESCE(m.date, s.date, m.created_at)))) AS first_month,
+        MAX(strftime('%Y-%m', DATE(COALESCE(m.date, s.date, m.created_at)))) AS last_month
+      FROM cash_movements m
+      LEFT JOIN cash_sessions s ON s.id = m.session_id
+      WHERE m.type = 'egreso'
+        AND TRIM(COALESCE(m.concept, '')) <> ''
+        ${dateSql}
+        AND LOWER(COALESCE(m.concept, '')) NOT LIKE 'nota de crédito #%'
+        AND LOWER(COALESCE(m.concept, '')) NOT LIKE 'nota de credito #%'
+      GROUP BY m.concept
+      ORDER BY LOWER(m.concept) ASC
+      `,
+      params
+    );
+
+    const range = rows.reduce(
+      (acc, row) => ({
+        first_month:
+          !acc.first_month || (row.first_month && row.first_month < acc.first_month)
+            ? row.first_month
+            : acc.first_month,
+        last_month:
+          !acc.last_month || (row.last_month && row.last_month > acc.last_month)
+            ? row.last_month
+            : acc.last_month
+      }),
+      { first_month: null, last_month: null }
+    );
+
+    return res.json({
+      range,
+      data: rows.map((row) => ({
+        concept: row.concept,
+        movements_count: Number(row.movements_count || 0),
+        total: Number(row.total || 0),
+        first_month: row.first_month,
+        last_month: row.last_month
+      }))
+    });
+  } catch (error) {
+    console.error('Error obteniendo conceptos de egresos:', error);
+    return res.status(500).json({ error: 'Error obteniendo conceptos de egresos' });
+  }
+};
+
+const exportRestockExpensesExcel = async (req, res) => {
+  try {
+    const filter = buildRestockExpenseWhere(req.query);
+
+    const rows = await allAsync(
+      `
+      SELECT
+        DATE(COALESCE(m.date, s.date, m.created_at)) AS date,
+        strftime('%Y-%m', DATE(COALESCE(m.date, s.date, m.created_at))) AS month_key,
+        m.concept,
+        ABS(COALESCE(m.amount, 0)) AS amount,
+        m.payment_method
+      FROM cash_movements m
+      LEFT JOIN cash_sessions s ON s.id = m.session_id
+      WHERE ${filter.where}
+      ORDER BY DATE(COALESCE(m.date, s.date, m.created_at)) ASC, m.created_at ASC, m.id ASC
+      `,
+      filter.params
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ error: 'No hay gastos de reposición para exportar.' });
+    }
+
+    const monthlyTotals = rows.reduce((acc, row) => {
+      const key = row.month_key;
+      if (!acc[key]) acc[key] = { total: 0, count: 0 };
+      acc[key].total += Number(row.amount || 0);
+      acc[key].count += 1;
+      return acc;
+    }, {});
+
+    const workbook = buildProfessionalWorkbook({
+      title: 'Gastos de Reposición de Mercadería',
+      subtitle: [
+        `Período: ${monthLabel(filter.startMonth)} a ${monthLabel(filter.endMonth)}`,
+        filter.concept ? `Concepto: ${filter.concept}` : 'Concepto: todos los egresos',
+        filter.keywords.length ? `Palabras clave: ${filter.keywords.join(', ')}` : null
+      ].filter(Boolean).join(' | '),
+      columns: [
+        { header: 'Fecha', key: 'date' },
+        { header: 'Mes', key: 'month' },
+        { header: 'Concepto', key: 'concept', width: 46 },
+        { header: 'Método', key: 'payment_method' },
+        { header: 'Importe', key: 'amount' }
+      ],
+      rows: rows.map((row) => ({
+        date: toLatinoDate(row.date),
+        month: monthLabel(row.month_key),
+        concept: row.concept || '-',
+        payment_method: row.payment_method || '-',
+        amount: Number(row.amount || 0)
+      })),
+      summaryRows: [
+        ...Object.entries(monthlyTotals).map(([monthKey, value]) => [
+          `Total ${monthLabel(monthKey)}`,
+          Number(value.total || 0)
+        ]),
+        ['Total general', rows.reduce((acc, row) => acc + Number(row.amount || 0), 0)]
+      ]
+    });
+
+    return sendWorkbook(res, workbook, `gastos_reposicion_${Date.now()}.xlsx`);
+  } catch (error) {
+    console.error('Error exportando Excel de gastos de reposición:', error);
+    return res.status(error.status || 500).json({
+      error: error.message || 'Error exportando Excel de gastos de reposición'
+    });
+  }
+};
+
 
 // ========================= Exports =========================
 module.exports = {
   getSalesReport,
+  getMonthlySalesReport,
+  getSalesAnalysisReport,
+  exportSalesAnalysisExcel,
   exportToCSV,
   exportToPDF,
   exportToExcel,
   exportCSV: exportToCSV,  // compatibilidad
   exportPDF: exportToPDF,  // compatibilidad
   exportExcel: exportToExcel,
+  exportMonthlySalesPDF,
+  exportMonthlySalesExcel,
   getExpiringProductsReport,
   exportExpiringCSV,
   exportExpiringPDF,
@@ -1963,6 +2776,8 @@ module.exports = {
   getProductsListingReport,
   exportProductsListingCSV,
   exportProductsListingPDF,
-  exportProductsListingExcel
+  exportProductsListingExcel,
+  getRestockExpensesReport,
+  getRestockExpenseConcepts,
+  exportRestockExpensesExcel
 };
-

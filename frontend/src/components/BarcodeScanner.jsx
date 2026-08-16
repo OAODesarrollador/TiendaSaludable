@@ -5,6 +5,55 @@ import { toast } from 'react-toastify';
 import Quagga from '@ericblade/quagga2';
 import AppModal from './AppModal';
 
+const normalizeDetectedCode = (code) => String(code || '').replace(/\D/g, '');
+
+const calculateEAN13CheckDigit = (code12) => {
+  if (!/^\d{12}$/.test(code12)) return null;
+
+  let sum = 0;
+  for (let i = 0; i < 12; i += 1) {
+    const digit = Number(code12[i]);
+    sum += i % 2 === 0 ? digit : digit * 3;
+  }
+
+  return String((10 - (sum % 10)) % 10);
+};
+
+const validateEAN13 = (code) => {
+  const normalized = normalizeDetectedCode(code);
+  if (!/^\d{13}$/.test(normalized)) return false;
+
+  return calculateEAN13CheckDigit(normalized.slice(0, 12)) === normalized.slice(12);
+};
+
+const SCANNER_READERS = ['ean_reader'];
+
+const CAMERA_CONSTRAINTS = [
+  {
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+    facingMode: { ideal: 'environment' }
+  },
+  {
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+    facingMode: 'user'
+  },
+  {
+    width: { ideal: 1280 },
+    height: { ideal: 720 }
+  }
+];
+
+const MIN_CONFIRMATIONS = 3;
+const QUAGGA_NOISE_PATTERNS = [
+  'InputStreamBrowser createLiveStream',
+  'InputStreamBrowser createVideoStream',
+  'initCanvas getCanvasAndContext',
+  'frame_grabber_browser: willReadFrequently',
+  'initCanvas willReadFrequently'
+];
+
 const BarcodeScanner = ({ isOpen, onClose, onDetected }) => {
   const [scanning, setScanning] = useState(false);
   const [detectedCode, setDetectedCode] = useState('');
@@ -12,6 +61,59 @@ const BarcodeScanner = ({ isOpen, onClose, onDetected }) => {
   const scannerRef = useRef(null);
   const initializedRef = useRef(false);
   const listenerAttachedRef = useRef(false);
+  const lastCandidateRef = useRef('');
+  const candidateCountRef = useRef(0);
+  const originalConsoleLogRef = useRef(null);
+  const originalConsoleWarnRef = useRef(null);
+
+  const shouldIgnoreQuaggaNoise = (args) => {
+    const message = args
+      .map((value) => (typeof value === 'string' ? value : ''))
+      .join(' ');
+
+    return QUAGGA_NOISE_PATTERNS.some((pattern) => message.includes(pattern));
+  };
+
+  const muteQuaggaNoise = () => {
+    if (!originalConsoleLogRef.current) {
+      originalConsoleLogRef.current = console.log;
+      console.log = (...args) => {
+        if (shouldIgnoreQuaggaNoise(args)) return;
+        originalConsoleLogRef.current(...args);
+      };
+    }
+
+    if (!originalConsoleWarnRef.current) {
+      originalConsoleWarnRef.current = console.warn;
+      console.warn = (...args) => {
+        if (shouldIgnoreQuaggaNoise(args)) return;
+        originalConsoleWarnRef.current(...args);
+      };
+    }
+  };
+
+  const restoreConsole = () => {
+    if (originalConsoleLogRef.current) {
+      console.log = originalConsoleLogRef.current;
+      originalConsoleLogRef.current = null;
+    }
+
+    if (originalConsoleWarnRef.current) {
+      console.warn = originalConsoleWarnRef.current;
+      originalConsoleWarnRef.current = null;
+    }
+  };
+
+  const normalizePreviewOrientation = () => {
+    if (!scannerRef.current) return;
+
+    const previewNodes = scannerRef.current.querySelectorAll('video, canvas');
+    previewNodes.forEach((node) => {
+      node.style.transform = 'none';
+      node.style.webkitTransform = 'none';
+      node.style.scale = '1 1';
+    });
+  };
 
   // Efecto controla inicio / parada, sin dependencias problemáticas
   useEffect(() => {
@@ -21,7 +123,16 @@ const BarcodeScanner = ({ isOpen, onClose, onDetected }) => {
       setDetectedCode('');
       setCameraError('');
       setScanning(false);
+      lastCandidateRef.current = '';
+      candidateCountRef.current = 0;
       return;
+    }
+
+    if (isOpen && !scanning) {
+      setCameraError('');
+      setDetectedCode('');
+      setScanning(true);
+      toast.info('Activando cámara...');
     }
 
     // Si el modal está abierto y el usuario ya pulsó "activar"
@@ -47,6 +158,29 @@ const BarcodeScanner = ({ isOpen, onClose, onDetected }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, scanning]);
 
+  const initQuagga = (constraints) =>
+    new Promise((resolve, reject) => {
+      Quagga.init(
+        {
+          inputStream: {
+            name: 'Live',
+            type: 'LiveStream',
+            target: scannerRef.current,
+            constraints,
+          },
+          locator: { patchSize: 'medium', halfSample: true },
+          decoder: {
+            readers: SCANNER_READERS,
+          },
+          locate: true,
+        },
+        (err) => {
+          if (err) return reject(err);
+          resolve();
+        }
+      );
+    });
+
   const startScanner = async () => {
     if (!scannerRef.current) {
       setCameraError('Contenedor del scanner no disponible');
@@ -54,69 +188,75 @@ const BarcodeScanner = ({ isOpen, onClose, onDetected }) => {
     }
 
     setCameraError('');
+    muteQuaggaNoise();
     try {
-      // Intentamos iniciar Quagga sobre el elemento target
-      Quagga.init(
-        {
-          inputStream: {
-            name: 'Live',
-            type: 'LiveStream',
-            target: scannerRef.current,
-            constraints: {
-              width: 640,
-              height: 480,
-              facingMode: { ideal: 'environment' },
-            },
-          },
-          locator: { patchSize: 'medium', halfSample: true },
-          decoder: {
-            readers: [
-              'ean_reader',
-              'ean_8_reader',
-              'code_128_reader',
-              'code_39_reader',
-              'upc_reader',
-              'upc_e_reader',
-            ],
-          },
-          locate: true,
-        },
-        (err) => {
-          if (err) {
-            console.error('Quagga init error:', err);
-            setCameraError('Error iniciando cámara. Revisa permisos o dispositivo.');
-            toast.error('No se pudo iniciar la cámara');
-            initializedRef.current = false;
-            return;
-          }
-          try {
-            Quagga.start();
-            toast.success('Escáner iniciado');
-          } catch (startErr) {
-            console.error('Quagga start error:', startErr);
-            setCameraError('No se pudo iniciar el stream de la cámara.');
-            initializedRef.current = false;
-            return;
-          }
+      let lastError = null;
 
-          // Attach detection listener once
-          if (!listenerAttachedRef.current) {
-            Quagga.onDetected(handleDetected);
-            listenerAttachedRef.current = true;
+      for (const constraints of CAMERA_CONSTRAINTS) {
+        try {
+          await initQuagga(constraints);
+          lastError = null;
+          break;
+        } catch (err) {
+          lastError = err;
+          try {
+            Quagga.stop();
+          } catch {
+            // ignore
           }
         }
-      );
+      }
+
+      if (lastError) {
+        console.error('Quagga init error:', lastError);
+        setCameraError('No se pudo iniciar la webcam. Revisá permisos del navegador o probá con otra cámara.');
+        toast.error('No se pudo iniciar la cámara');
+        initializedRef.current = false;
+        return;
+      }
+
+      try {
+        Quagga.start();
+        requestAnimationFrame(normalizePreviewOrientation);
+        setTimeout(normalizePreviewOrientation, 150);
+        toast.success('Escáner iniciado');
+      } catch (startErr) {
+        console.error('Quagga start error:', startErr);
+        setCameraError('No se pudo iniciar el stream de la webcam.');
+        initializedRef.current = false;
+        return;
+      }
+
+      if (!listenerAttachedRef.current) {
+        Quagga.onDetected(handleDetected);
+        listenerAttachedRef.current = true;
+      }
     } catch (e) {
       console.error('startScanner exception:', e);
-      setCameraError('Error inesperado al iniciar la cámara');
+      setCameraError('Error inesperado al iniciar la webcam');
       initializedRef.current = false;
+      restoreConsole();
     }
   };
 
   const handleDetected = (result) => {
-    const code = result?.codeResult?.code;
+    const code = normalizeDetectedCode(result?.codeResult?.code);
     if (!code) return;
-    // Protegemos contra múltiples triggers
+    if (!validateEAN13(code)) {
+      return;
+    }
+
+    if (lastCandidateRef.current !== code) {
+      lastCandidateRef.current = code;
+      candidateCountRef.current = 1;
+      return;
+    }
+
+    candidateCountRef.current += 1;
+    if (candidateCountRef.current < MIN_CONFIRMATIONS) {
+      return;
+    }
+
     if (detectedCode === code) return;
     setDetectedCode(code);
     if (navigator.vibrate) navigator.vibrate(150);
@@ -130,6 +270,8 @@ const BarcodeScanner = ({ isOpen, onClose, onDetected }) => {
     // Detenemos Quagga y cerramos modal
     internalStopQuagga();
     setScanning(false);
+    lastCandidateRef.current = '';
+    candidateCountRef.current = 0;
     onClose();
   };
 
@@ -151,6 +293,9 @@ const BarcodeScanner = ({ isOpen, onClose, onDetected }) => {
       // console.warn('Quagga stop warning:', err);
     } finally {
       initializedRef.current = false;
+      lastCandidateRef.current = '';
+      candidateCountRef.current = 0;
+      restoreConsole();
     }
   };
 
@@ -160,6 +305,8 @@ const BarcodeScanner = ({ isOpen, onClose, onDetected }) => {
     setScanning(false);
     setDetectedCode('');
     setCameraError('');
+    lastCandidateRef.current = '';
+    candidateCountRef.current = 0;
     onClose();
   };
 
@@ -167,6 +314,8 @@ const BarcodeScanner = ({ isOpen, onClose, onDetected }) => {
     setCameraError('');
     setDetectedCode('');
     setScanning(true);
+    lastCandidateRef.current = '';
+    candidateCountRef.current = 0;
     toast.info('Activando cámara...');
   };
 
@@ -185,15 +334,18 @@ const BarcodeScanner = ({ isOpen, onClose, onDetected }) => {
           {!scanning ? (
             <div className="flex flex-col items-center justify-center py-12 bg-gray-100 rounded-lg">
               <Scan size={64} className="text-gray-400 mb-4" />
-              <p className="text-gray-600 mb-4 text-center">Presiona el botón para activar la cámara</p>
+              <p className="text-gray-600 mb-4 text-center">Iniciando cámara...</p>
               <button onClick={handleStartScan} className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700">
-                <Camera size={20} /> Activar Cámara
+                <Camera size={20} /> Reintentar Cámara
               </button>
               {cameraError && <p className="text-red-600 text-sm mt-3">{cameraError}</p>}
             </div>
           ) : (
             <div className="relative">
-              <div ref={scannerRef} className="w-full aspect-video bg-black rounded-lg overflow-hidden min-h-[300px]" />
+              <div
+                ref={scannerRef}
+                className="w-full aspect-video bg-black rounded-lg overflow-hidden min-h-[300px] [&_video]:!transform-none [&_canvas]:!transform-none"
+              />
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="border-4 border-green-500 w-3/4 h-1/2 rounded-lg relative">
                   <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-white" />

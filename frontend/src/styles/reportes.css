@@ -72,3 +72,106 @@
 .table-sticky td:nth-child(10) { width: 8%; }  /* Haber */
 .table-sticky th:nth-child(11),
 .table-sticky td:nth-child(11) { width: 10%; } /* Método */
+
+.sales-analysis-panel {
+  border: 1px solid #d7e5dc;
+  border-radius: 8px;
+  background: #fbfdfc;
+  padding: 16px;
+}
+
+.sales-analysis-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.sales-analysis-actions {
+  display: flex;
+  gap: 8px;
+  min-width: 330px;
+}
+
+.sales-analysis-actions .form-control {
+  max-width: 96px;
+}
+
+.sales-analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sales-analysis-item,
+.sales-analysis-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.sales-analysis-item span {
+  color: #374151;
+  font-size: 0.92rem;
+}
+
+.sales-analysis-item strong {
+  color: #11633a;
+  font-size: 1rem;
+  white-space: nowrap;
+}
+
+.sales-analysis-empty {
+  grid-column: 1 / -1;
+  justify-content: center;
+  color: #6b7280;
+}
+
+.expense-total-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #d7e5dc;
+  border-radius: 8px;
+  background: #fbfdfc;
+  padding: 10px 14px;
+}
+
+.expense-total-box span {
+  color: #374151;
+  font-size: 0.95rem;
+}
+
+.expense-total-box strong {
+  color: #b42318;
+  font-size: 1.2rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .sales-analysis-header {
+    flex-direction: column;
+  }
+
+  .sales-analysis-actions {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .sales-analysis-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-analysis-item {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+}

@@ -206,6 +206,15 @@ const Layout = () => {
                   >
                     📦 Productos
                   </Link>
+                  <Link
+                    to="/reportes/gastos"
+                    className={`ln-dropdown-item ${
+                      location.pathname === "/reportes/gastos" ? "ln-active" : ""
+                    }`}
+                    onClick={() => setReportesOpen(true)}
+                  >
+                    💸 Gastos
+                  </Link>
                 </div>
               )}
             </div>

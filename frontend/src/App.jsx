@@ -22,6 +22,7 @@ import ReporteVentas from "./pages/reportes/ReporteVentas";
 import ReporteVencimientos from "./pages/reportes/ReporteVencimineto";
 import ReporteDescuentos from "./pages/reportes/ReporteDescuentos";
 import ReporteProductos from "./pages/reportes/ReporteProductos";
+import ReporteGastos from "./pages/reportes/ReporteGastos";
 import Caja from "./pages/caja";
 
 
@@ -76,6 +77,7 @@ function App() {
             <Route path="/reportes/vencimientos" element={<ReporteVencimientos />} />
             <Route path="/reportes/descuentos" element={<ReporteDescuentos />} />
             <Route path="/reportes/productos" element={<ReporteProductos />} />
+            <Route path="/reportes/gastos" element={<ReporteGastos />} />
             <Route path="/caja" element={<Caja />} />
 
             {/* (Opcional) Si alguien navega a /reports, redirigimos a /reportes/ventas */}
